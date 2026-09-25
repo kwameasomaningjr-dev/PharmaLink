@@ -83,8 +83,15 @@ const App = {
   // ========================================================
   // AUTHENTICATION & ACCOUNT REGISTRATION FLOW
   // ========================================================
-  openLoginModal() {
+  openLoginModal(targetRole) {
     this.closeModals();
+    if (targetRole === 'PHARMACY') {
+      const idInput = document.getElementById('loginIdentifier');
+      if (idInput) idInput.value = 'admin@eastlegonrx.gh';
+    } else if (targetRole === 'CUSTOMER') {
+      const idInput = document.getElementById('loginIdentifier');
+      if (idInput) idInput.value = 'kwame.customer@gmail.com';
+    }
     document.getElementById('loginModal').classList.add('open');
   },
 
@@ -1263,7 +1270,7 @@ const App = {
             <td>${i.strength_value || ''}${i.strength_unit || ''} ${i.formulation}</td>
             <td>${i.observed_quantity} units</td>
             <td style="color: #dc2626; font-weight: 700;">${i.reserved_quantity} locked</td>
-            <td style="color: #059669; font-weight: 700;">${i.available_quantity} available</td>
+            <td style="color: #1a1a1a; font-weight: 700;">${i.available_quantity} available</td>
             <td>GHS ${(i.unit_price_minor / 100).toFixed(2)}</td>
             <td><span class="badge ${stateBadge}">${i.availability_state}</span></td>
             <td><small style="color: var(--text-muted);">${i.freshness_label || 'Today'}</small></td>
@@ -1342,8 +1349,8 @@ const App = {
 
       const d = data.data;
       feedback.innerHTML = `
-        <div style="background: ${d.records_rejected > 0 ? '#fffbeb' : '#ecfdf5'}; border: 1px solid ${d.records_rejected > 0 ? '#fde68a' : '#a7f3d0'}; padding: 1rem; border-radius: var(--radius-md);">
-          <h4 style="font-weight: 700; margin-bottom: 0.5rem; color: ${d.records_rejected > 0 ? '#b45309' : '#065f46'};">
+        <div style="background: ${d.records_rejected > 0 ? '#fffbeb' : '#f5f5f5'}; border: 1px solid ${d.records_rejected > 0 ? '#fde68a' : '#cccccc'}; padding: 1rem; border-radius: var(--radius-md);">
+          <h4 style="font-weight: 700; margin-bottom: 0.5rem; color: ${d.records_rejected > 0 ? '#b45309' : '#1a1a1a'};">
             Import Status: ${d.status} (${d.records_accepted} accepted, ${d.records_rejected} flagged)
           </h4>
           <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 0.5rem;">

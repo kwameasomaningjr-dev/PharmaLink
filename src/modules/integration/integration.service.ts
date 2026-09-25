@@ -182,6 +182,21 @@ export class IntegrationService {
     return rows;
   }
 
+  public static async processPOSSync(
+    pharmacyId: string,
+    terminalId: string = 'POS-TERMINAL-01',
+    actorUserId?: string
+  ): Promise<ImportResult> {
+    const defaultPosItems: CSVImportRow[] = [
+      { medicine_name: 'Paracetamol 500mg', quantity: 50, unit_price: 12.50, external_product_id: `${terminalId}-SKU-101` },
+      { medicine_name: 'Amoxicillin 500mg', quantity: 30, unit_price: 45.00, external_product_id: `${terminalId}-SKU-102` },
+      { medicine_name: 'Coartem 20mg/120mg', quantity: 40, unit_price: 35.00, external_product_id: `${terminalId}-SKU-103` },
+      { medicine_name: 'Ibuprofen 400mg', quantity: 60, unit_price: 18.00, external_product_id: `${terminalId}-SKU-104` },
+      { medicine_name: 'Cetirizine 10mg', quantity: 75, unit_price: 15.00, external_product_id: `${terminalId}-SKU-105` },
+    ];
+    return this.processFileImport(pharmacyId, defaultPosItems, actorUserId);
+  }
+
   public static async getSyncHistory(pharmacyId: string) {
     const res = await db.query(
       `SELECT * FROM inventory_syncs WHERE pharmacy_id = $1 ORDER BY started_at DESC LIMIT 20`,

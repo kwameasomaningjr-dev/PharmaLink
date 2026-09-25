@@ -27,8 +27,11 @@ export async function seedDatabase(force = false) {
   const customer1Id = 'c0000000-0000-0000-0000-000000000006';
   const customer2Id = 'c0000000-0000-0000-0000-000000000007';
 
-  // Wipe data/pglite or clear existing tables if re-seeding
-  await db.exec('DELETE FROM reservations; DELETE FROM order_items; DELETE FROM orders; DELETE FROM inventory_observations; DELETE FROM inventory; DELETE FROM pharmacy_users; DELETE FROM users; DELETE FROM pharmacies; DELETE FROM medicine_aliases; DELETE FROM medicines;');
+  // Wipe tables sequentially to avoid PGlite multi-statement exec limitations
+  const tablesToClear = ['reservations', 'order_items', 'orders', 'inventory_observations', 'inventory', 'pharmacy_users', 'users', 'pharmacies', 'medicine_aliases', 'medicines'];
+  for (const t of tablesToClear) {
+    try { await db.exec(`DELETE FROM ${t};`); } catch {}
+  }
 
   const usersToSeed = [
     { id: platformAdminId, email: 'ops@pharmalink.gh', phone: '+233200000001', role: 'PLATFORM_OPS', first: 'Kofi', last: 'Admin' },
@@ -43,7 +46,15 @@ export async function seedDatabase(force = false) {
   for (const u of usersToSeed) {
     await db.query(
       `INSERT INTO users (id, email, phone, password_hash, role, first_name, last_name, status)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, 'ACTIVE')`,
+       VALUES ($1, $2, $3, $4, $5, $6, $7, 'ACTIVE')
+       ON CONFLICT (id) DO UPDATE SET 
+         password_hash = EXCLUDED.password_hash,
+         email = EXCLUDED.email,
+         phone = EXCLUDED.phone,
+         role = EXCLUDED.role,
+         first_name = EXCLUDED.first_name,
+         last_name = EXCLUDED.last_name,
+         status = 'ACTIVE'`,
       [u.id, u.email, u.phone, passwordHash, u.role, u.first, u.last]
     );
   }
@@ -173,7 +184,7 @@ export async function seedDatabase(force = false) {
 }
 
 if (process.argv[1] && process.argv[1].endsWith('seed.ts')) {
-  seedDatabase()
+  seedDatabase(true)
     .then(() => process.exit(0))
     .catch((err) => {
       console.error('[Seed] Failed:', err);

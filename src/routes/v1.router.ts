@@ -281,6 +281,20 @@ v1Router.post('/inventory/import', authenticateJwt, requirePharmacyStaff, async 
   }
 });
 
+v1Router.post('/inventory/pos-sync', authenticateJwt, requirePharmacyStaff, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { terminal_id } = req.body;
+    const result = await IntegrationService.processPOSSync(
+      req.pharmacyId!,
+      terminal_id || 'POS-TERMINAL-01',
+      req.user!.id
+    );
+    return sendSuccess(res, result);
+  } catch (err) {
+    next(err);
+  }
+});
+
 v1Router.get('/integrations', authenticateJwt, requirePharmacyStaff, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const history = await IntegrationService.getSyncHistory(req.pharmacyId!);
