@@ -2,17 +2,16 @@ import bcrypt from 'bcryptjs';
 import { v4 as uuidv4 } from 'uuid';
 import { db } from './connection.js';
 import { runMigrations } from './migrate.js';
+import { AuditService } from '../modules/audit/audit.service.js';
 
 export async function seedDatabase(force = false) {
   console.log('[Seed] Ensuring schema exists...');
-  try {
-    const existing = await db.query('SELECT COUNT(*) as cnt FROM users');
-    if (!force && Number(existing.rows[0]?.cnt) > 0 && process.env.NODE_ENV !== 'test') {
-      console.log(`[Seed] Database already seeded (${existing.rows[0].cnt} users). Ready.`);
-      return;
-    }
-  } catch {
-    await runMigrations();
+  await runMigrations();
+
+  const existing = await db.query('SELECT COUNT(*) as cnt FROM users');
+  if (!force && Number(existing.rows[0]?.cnt) > 0 && process.env.NODE_ENV !== 'test') {
+    console.log(`[Seed] Database already seeded (${existing.rows[0].cnt} users). Ready.`);
+    return;
   }
 
   // Hash dynamically once with 8 rounds (<10ms)
@@ -26,9 +25,11 @@ export async function seedDatabase(force = false) {
   const spintexAdminId = 'c0000000-0000-0000-0000-000000000005';
   const customer1Id = 'c0000000-0000-0000-0000-000000000006';
   const customer2Id = 'c0000000-0000-0000-0000-000000000007';
+  const temaAdminId = 'c0000000-0000-0000-0000-000000000008';
+  const kumasiAdminId = 'c0000000-0000-0000-0000-000000000009';
 
   // Wipe tables sequentially to avoid PGlite multi-statement exec limitations
-  const tablesToClear = ['reservations', 'order_items', 'orders', 'inventory_observations', 'inventory', 'pharmacy_users', 'users', 'pharmacies', 'medicine_aliases', 'medicines'];
+  const tablesToClear = ['reservations', 'order_items', 'orders', 'inventory_observations', 'inventory', 'audit_events', 'pharmacy_users', 'users', 'pharmacies', 'medicine_aliases', 'medicines'];
   for (const t of tablesToClear) {
     try { await db.exec(`DELETE FROM ${t};`); } catch {}
   }
@@ -41,6 +42,8 @@ export async function seedDatabase(force = false) {
     { id: spintexAdminId, email: 'admin@spintexcare.gh', phone: '+233240000005', role: 'PHARMACY_ADMIN', first: 'Esi', last: 'Acheampong' },
     { id: customer1Id, email: 'kwame.customer@gmail.com', phone: '+233550000006', role: 'CUSTOMER', first: 'Kwame', last: 'Asomaning' },
     { id: customer2Id, email: 'abena.customer@yahoo.com', phone: '+233550000007', role: 'CUSTOMER', first: 'Abena', last: 'Kusi' },
+    { id: temaAdminId, email: 'admin@temacommunitydemo.gh', phone: '+233240000008', role: 'PHARMACY_ADMIN', first: 'Nana', last: 'Mensah' },
+    { id: kumasiAdminId, email: 'admin@kumasidemo.gh', phone: '+233240000009', role: 'PHARMACY_ADMIN', first: 'Yaw', last: 'Asare' },
   ];
 
   for (const u of usersToSeed) {
@@ -64,6 +67,8 @@ export async function seedDatabase(force = false) {
   const pOsu = 'e2222222-2222-2222-2222-222222222222';
   const pAirport = 'e3333333-3333-3333-3333-333333333333';
   const pSpintex = 'e4444444-4444-4444-4444-444444444444';
+  const pTemaPending = 'e5555555-5555-5555-5555-555555555555';
+  const pKumasiRejected = 'e6666666-6666-6666-6666-666666666666';
 
   const defaultHours = JSON.stringify({
     mon_fri: '08:00 - 21:00',
@@ -74,12 +79,14 @@ export async function seedDatabase(force = false) {
   await db.query(
     `INSERT INTO pharmacies (id, legal_name, display_name, license_number, verification_status, address_line, city, region, latitude, longitude, phone, email, opening_hours, fulfillment_options)
      VALUES
-     ($1, 'East Legon Healthline Pharmacy Ltd', 'East Legon Pharmacy', 'FDA-PH-2023-0101', 'VERIFIED', 'Lagos Avenue, East Legon', 'Accra', 'Greater Accra', 5.635800, -0.158400, '+233302111222', 'eastlegon@pharmalink.gh', $5, '{"pickup": true, "delivery": true, "delivery_base_fee_minor": 2000, "delivery_radius_km": 10, "response_window_minutes": 15}'),
-     ($2, 'Osu Standard Chemist Ltd', 'Osu Standard Chemist', 'FDA-PH-2022-0452', 'VERIFIED', 'Oxford Street, Osu', 'Accra', 'Greater Accra', 5.556000, -0.182100, '+233302222333', 'osu@pharmalink.gh', $5, '{"pickup": true, "delivery": true, "delivery_base_fee_minor": 1500, "delivery_radius_km": 8, "response_window_minutes": 20}'),
-     ($3, 'Airport Residential Pharmacy Services', 'Airport Residential Pharmacy', 'FDA-PH-2021-0899', 'VERIFIED', 'Airport Residential Area, Accra', 'Accra', 'Greater Accra', 5.603700, -0.187000, '+233302333444', 'airport@pharmalink.gh', $5, '{"pickup": true, "delivery": false, "delivery_base_fee_minor": 0, "delivery_radius_km": 0, "response_window_minutes": 10}'),
-     ($4, 'Spintex Community Care Pharmacy', 'Spintex Care Pharmacy', 'FDA-PH-2023-1120', 'VERIFIED', 'Spintex Road near Coastal Junction', 'Accra', 'Greater Accra', 5.623100, -0.102500, '+233302444555', 'spintex@pharmalink.gh', $5, '{"pickup": true, "delivery": true, "delivery_base_fee_minor": 2500, "delivery_radius_km": 12, "response_window_minutes": 30}')
+     ($1, 'East Legon Healthline Pharmacy Ltd', 'East Legon Pharmacy', 'FDA-PH-2023-0101', 'VERIFIED', 'Lagos Avenue, East Legon', 'Accra', 'Greater Accra', 5.635800, -0.158400, '+233302111222', 'eastlegon@pharmalink.gh', $7, '{"pickup": true, "delivery": true, "delivery_base_fee_minor": 2000, "delivery_radius_km": 10, "response_window_minutes": 15}'),
+     ($2, 'Osu Standard Chemist Ltd', 'Osu Standard Chemist', 'FDA-PH-2022-0452', 'VERIFIED', 'Oxford Street, Osu', 'Accra', 'Greater Accra', 5.556000, -0.182100, '+233302222333', 'osu@pharmalink.gh', $7, '{"pickup": true, "delivery": true, "delivery_base_fee_minor": 1500, "delivery_radius_km": 8, "response_window_minutes": 20}'),
+     ($3, 'Airport Residential Pharmacy Services', 'Airport Residential Pharmacy', 'FDA-PH-2021-0899', 'VERIFIED', 'Airport Residential Area, Accra', 'Accra', 'Greater Accra', 5.603700, -0.187000, '+233302333444', 'airport@pharmalink.gh', $7, '{"pickup": true, "delivery": false, "delivery_base_fee_minor": 0, "delivery_radius_km": 0, "response_window_minutes": 10}'),
+     ($4, 'Spintex Community Care Pharmacy', 'Spintex Care Pharmacy', 'FDA-PH-2023-1120', 'VERIFIED', 'Spintex Road near Coastal Junction', 'Accra', 'Greater Accra', 5.623100, -0.102500, '+233302444555', 'spintex@pharmalink.gh', $7, '{"pickup": true, "delivery": true, "delivery_base_fee_minor": 2500, "delivery_radius_km": 12, "response_window_minutes": 30}'),
+     ($5, 'Tema Community Health Pharmacy Ltd', 'Tema Community Health Pharmacy', 'FDA-PH-DEMO-0501', 'PENDING', 'Community 8, Tema', 'Tema', 'Greater Accra', 5.690200, -0.016900, '+233302555666', 'tema-demo@pharmalink.gh', $7, '{"pickup": true, "delivery": true, "delivery_base_fee_minor": 1800, "delivery_radius_km": 8, "response_window_minutes": 25}'),
+     ($6, 'Kumasi Central Wellness Ltd', 'Kumasi Central Wellness', 'FDA-PH-DEMO-0502', 'REJECTED', 'Adum Road, Kumasi', 'Kumasi', 'Ashanti', 6.688500, -1.624400, '+233302555777', 'kumasi-demo@pharmalink.gh', $7, '{"pickup": true, "delivery": false, "delivery_base_fee_minor": 0, "delivery_radius_km": 0, "response_window_minutes": 20}')
      ON CONFLICT (id) DO NOTHING`,
-    [pEastLegon, pOsu, pAirport, pSpintex, defaultHours]
+    [pEastLegon, pOsu, pAirport, pSpintex, pTemaPending, pKumasiRejected, defaultHours]
   );
 
   // Pharmacy Users mapping
@@ -89,9 +96,28 @@ export async function seedDatabase(force = false) {
      ('${uuidv4()}', '${pEastLegon}', '${eastLegonAdminId}', 'ADMIN', 'ACTIVE'),
      ('${uuidv4()}', '${pOsu}', '${osuAdminId}', 'ADMIN', 'ACTIVE'),
      ('${uuidv4()}', '${pAirport}', '${airportAdminId}', 'ADMIN', 'ACTIVE'),
-     ('${uuidv4()}', '${pSpintex}', '${spintexAdminId}', 'ADMIN', 'ACTIVE')
+     ('${uuidv4()}', '${pSpintex}', '${spintexAdminId}', 'ADMIN', 'ACTIVE'),
+     ('${uuidv4()}', '${pTemaPending}', '${temaAdminId}', 'ADMIN', 'ACTIVE'),
+     ('${uuidv4()}', '${pKumasiRejected}', '${kumasiAdminId}', 'ADMIN', 'ACTIVE')
      ON CONFLICT (pharmacy_id, user_id) DO NOTHING`
   );
+
+  await AuditService.recordEvent({
+    actorUserId: platformAdminId,
+    pharmacyId: pTemaPending,
+    eventType: 'PHARMACY_ONBOARDED',
+    entityType: 'PHARMACY',
+    entityId: pTemaPending,
+    metadata: { demo: true, status: 'PENDING' },
+  });
+  await AuditService.recordEvent({
+    actorUserId: platformAdminId,
+    pharmacyId: pKumasiRejected,
+    eventType: 'PHARMACY_VERIFICATION_UPDATED',
+    entityType: 'PHARMACY',
+    entityId: pKumasiRejected,
+    metadata: { demo: true, previous_status: 'PENDING', new_status: 'REJECTED' },
+  });
 
   // 3. Canonical Medicines (valid hexadecimal UUIDs)
   const medParacetamolTab = 'a1111111-1111-1111-1111-111111111111';

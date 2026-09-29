@@ -247,12 +247,26 @@ describe('PHARMACY PLATFORM ACCEPTANCE TESTS', () => {
     const presUpload = await request(app)
       .post('/v1/prescriptions')
       .set('Authorization', `Bearer ${customerToken}`)
-      .send({
-        order_id: order.id,
-        storage_key: 'prescriptions/rx_user_test_amox.jpg',
+      .field('order_id', order.id)
+      .attach('file', Buffer.from('%PDF-1.7\nPharmaLink test prescription'), {
+        filename: 'test-prescription.pdf',
+        contentType: 'application/pdf',
       });
     expect(presUpload.status).toBe(201);
     expect(presUpload.body.data.status).toBe('UPLOADED');
+
+    const prescriptionFile = await request(app)
+      .get(`/v1/prescriptions/${presUpload.body.data.id}/file`)
+      .set('Authorization', `Bearer ${customerToken}`);
+    expect(prescriptionFile.status).toBe(200);
+    expect(prescriptionFile.headers['content-type']).toContain('application/pdf');
+    expect(prescriptionFile.headers['content-disposition']).toBe('inline');
+
+    const pendingRes = await request(app)
+      .get('/v1/prescriptions/pending')
+      .set('Authorization', `Bearer ${eastLegonStaffToken}`);
+    expect(pendingRes.status).toBe(200);
+    expect(pendingRes.body.data.some((item: any) => item.id === presUpload.body.data.id)).toBe(true);
 
     // 3. Pharmacist reviews and approves prescription
     const reviewRes = await request(app)
@@ -265,6 +279,12 @@ describe('PHARMACY PLATFORM ACCEPTANCE TESTS', () => {
 
     expect(reviewRes.status).toBe(200);
     expect(reviewRes.body.data.status).toBe('APPROVED');
+
+    const acceptRes = await request(app)
+      .post(`/v1/pharmacy/orders/${order.id}/accept`)
+      .set('Authorization', `Bearer ${eastLegonStaffToken}`);
+    expect(acceptRes.status).toBe(200);
+    expect(acceptRes.body.data.status).toBe('ACCEPTED');
   });
 
   // AT-11 & AT-12: Tenant Isolation & Authorization Boundaries
@@ -299,5 +319,62 @@ InvalidQtyItem,-5,20.00`;
     expect(importRes.body.data.records_accepted).toBe(2);
     expect(importRes.body.data.records_rejected).toBe(2);
     expect(importRes.body.data.status).toBe('PARTIAL');
+  });
+
+  it('SEC-01: Public registration cannot create privileged accounts or bypass passwords', async () => {
+    const privilegedRegistration = await request(app)
+      .post('/v1/auth/register')
+      .send({
+        email: 'security.role.test@example.com',
+        password: 'CorrectPassword123!',
+        first_name: 'Security',
+        role: 'PLATFORM_OPS',
+      });
+
+    expect(privilegedRegistration.status).toBe(422);
+
+    const registration = await request(app)
+      .post('/v1/auth/register')
+      .send({
+        email: 'security.password.test@example.com',
+        password: 'CorrectPassword123!',
+        first_name: 'Security',
+      });
+
+    expect(registration.status).toBe(201);
+
+    const bypassAttempt = await request(app)
+      .post('/v1/auth/login')
+      .send({
+        identifier: 'security.password.test@example.com',
+        password: 'Password123!',
+      });
+
+    expect(bypassAttempt.status).toBe(401);
+  });
+
+  it('SEC-02: A pharmacy applicant does not receive active pharmacy staff access before verification', async () => {
+    const pharmacyApplication = await request(app)
+      .post('/v1/pharmacies')
+      .set('Authorization', `Bearer ${customerToken}`)
+      .send({
+        legal_name: 'Pending Applicant Pharmacy Ltd',
+        display_name: 'Pending Applicant Pharmacy',
+        license_number: 'FDA-PH-TEST-001',
+        address_line: 'Test Street, Accra',
+        city: 'Accra',
+        region: 'Greater Accra',
+        latitude: 5.6037,
+        longitude: -0.187,
+        phone: '+233240000099',
+      });
+
+    expect(pharmacyApplication.status).toBe(201);
+
+    const privateInventory = await request(app)
+      .get('/v1/inventory')
+      .set('Authorization', `Bearer ${customerToken}`);
+
+    expect(privateInventory.status).toBe(403);
   });
 });

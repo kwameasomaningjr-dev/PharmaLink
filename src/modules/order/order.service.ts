@@ -56,6 +56,9 @@ export class OrderService {
     if (!input.pharmacy_id || !input.items || input.items.length === 0) {
       throw new ValidationError('Pharmacy ID and at least one order item are required.');
     }
+    if (input.fulfillment_type === 'DELIVERY' && !input.delivery_address?.trim()) {
+      throw new ValidationError('A delivery address is required for delivery orders.');
+    }
 
     // Verify pharmacy exists and is verified
     const pharmRes = await db.query(
@@ -133,8 +136,8 @@ export class OrderService {
         `INSERT INTO orders (
           id, order_number, customer_id, pharmacy_id, status,
           fulfillment_type, subtotal_minor, delivery_fee_minor, total_minor,
-          currency, customer_note, expires_at, created_at, updated_at
-        ) VALUES ($1, $2, $3, $4, 'PENDING', $5, $6, $7, $8, 'GHS', $9, $10, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+          currency, customer_note, delivery_address, expires_at, created_at, updated_at
+        ) VALUES ($1, $2, $3, $4, 'PENDING', $5, $6, $7, $8, 'GHS', $9, $10, $11, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
         [
           orderId,
           orderNumber,
@@ -145,6 +148,7 @@ export class OrderService {
           deliveryFeeMinor,
           totalMinor,
           input.customer_note || null,
+          input.delivery_address?.trim() || null,
           expiresAt.toISOString(),
         ]
       );
@@ -185,7 +189,7 @@ export class OrderService {
       await NotificationService.queueNotification({
         userId: customerId,
         type: 'ORDER_SUBMITTED',
-        channel: 'SMS',
+        channel: 'IN_APP',
         referenceType: 'ORDER',
         referenceId: orderId,
         client: tx,
@@ -205,7 +209,7 @@ export class OrderService {
     return await db.transaction(async (tx) => {
       // 1. Fetch order with lock
       const orderRes = await tx.query<Order>(
-        `SELECT * FROM orders WHERE id = $1`,
+        `SELECT * FROM orders WHERE id = $1 FOR UPDATE`,
         [orderId]
       );
 
@@ -237,10 +241,32 @@ export class OrderService {
         [orderId]
       );
 
+      const prescriptionRes = await tx.query(
+        `SELECT oi.display_name
+         FROM order_items oi
+         JOIN medicines m ON m.id = oi.medicine_id
+         WHERE oi.order_id = $1
+           AND m.prescription_required = TRUE
+           AND NOT EXISTS (
+             SELECT 1
+             FROM prescriptions p
+             WHERE p.order_id = oi.order_id
+               AND p.status = 'APPROVED'
+           )
+         LIMIT 1`,
+        [orderId]
+      );
+
+      if (prescriptionRes.rowCount > 0) {
+        throw new OrderNotAcceptableError(
+          `Prescription approval is required before accepting ${prescriptionRes.rows[0].display_name}.`
+        );
+      }
+
       // 3. For each item, lock inventory row and verify available-to-order stock
       for (const item of itemsRes.rows) {
         const invRes = await tx.query<Inventory>(
-          `SELECT * FROM inventory WHERE pharmacy_id = $1 AND medicine_id = $2`,
+          `SELECT * FROM inventory WHERE pharmacy_id = $1 AND medicine_id = $2 FOR UPDATE`,
           [pharmacyId, item.medicine_id]
         );
 
@@ -317,7 +343,7 @@ export class OrderService {
       await NotificationService.queueNotification({
         userId: order.customer_id,
         type: 'ORDER_ACCEPTED',
-        channel: 'SMS',
+        channel: 'IN_APP',
         referenceType: 'ORDER',
         referenceId: orderId,
         client: tx,
@@ -389,7 +415,7 @@ export class OrderService {
       await NotificationService.queueNotification({
         userId: order.customer_id,
         type: 'ORDER_REJECTED',
-        channel: 'SMS',
+        channel: 'IN_APP',
         referenceType: 'ORDER',
         referenceId: orderId,
         client: tx,
@@ -417,9 +443,9 @@ export class OrderService {
     const allowedTransitions: Record<OrderStatus, OrderStatus[]> = {
       DRAFT: ['PENDING', 'CANCELLED'],
       PENDING: ['ACCEPTED', 'REJECTED', 'EXPIRED', 'CANCELLED'],
-      ACCEPTED: ['PROCESSING', 'CANCELLED'],
-      PROCESSING: ['READY', 'OUT_FOR_DELIVERY', 'CANCELLED'],
-      READY: ['COMPLETED', 'CANCELLED'],
+      ACCEPTED: ['PROCESSING', 'READY', 'OUT_FOR_DELIVERY', 'COMPLETED', 'CANCELLED'],
+      PROCESSING: ['READY', 'OUT_FOR_DELIVERY', 'COMPLETED', 'CANCELLED'],
+      READY: ['OUT_FOR_DELIVERY', 'COMPLETED', 'CANCELLED'],
       OUT_FOR_DELIVERY: ['COMPLETED', 'CANCELLED'],
       COMPLETED: [],
       REJECTED: [],
@@ -476,7 +502,7 @@ export class OrderService {
       await NotificationService.queueNotification({
         userId: order.customer_id,
         type: `ORDER_${targetStatus}`,
-        channel: 'SMS',
+        channel: 'IN_APP',
         referenceType: 'ORDER',
         referenceId: orderId,
         client: tx,
@@ -604,7 +630,21 @@ export class OrderService {
 
   public static async listCustomerOrders(customerId: string) {
     const res = await db.query(
-      `SELECT o.*, p.display_name as pharmacy_name, p.address_line as pharmacy_address
+      `SELECT o.*, p.display_name as pharmacy_name, p.address_line as pharmacy_address,
+              (
+                SELECT p2.status
+                FROM prescriptions p2
+                WHERE p2.order_id = o.id
+                ORDER BY p2.created_at DESC
+                LIMIT 1
+              ) as latest_prescription_status,
+              (
+                SELECT p2.review_note
+                FROM prescriptions p2
+                WHERE p2.order_id = o.id
+                ORDER BY p2.created_at DESC
+                LIMIT 1
+              ) as latest_prescription_note
        FROM orders o
        JOIN pharmacies p ON p.id = o.pharmacy_id
        WHERE o.customer_id = $1

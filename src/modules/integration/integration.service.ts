@@ -4,7 +4,7 @@ import { SyncStatus, SyncSourceType } from '../../common/types.js';
 import { MedicineService } from '../medicine/medicine.service.js';
 import { InventoryService } from '../inventory/inventory.service.js';
 import { AuditService } from '../audit/audit.service.js';
-import { ValidationError, NotFoundError } from '../../common/errors.js';
+import { ValidationError, ConflictError } from '../../common/errors.js';
 
 export interface CSVImportRow {
   medicine_name: string;
@@ -22,7 +22,25 @@ export interface ImportResult {
   rejected_rows: { row: number; medicine_name: string; reason: string }[];
 }
 
+export interface PosAdapter {
+  readonly providerName: string;
+  sync(input: { pharmacyId: string; terminalId: string }): Promise<CSVImportRow[]>;
+}
+
+class UnavailablePosAdapter implements PosAdapter {
+  readonly providerName = 'unavailable';
+
+  async sync(): Promise<CSVImportRow[]> {
+    throw new ConflictError('POS_PROVIDER_UNAVAILABLE', 'No live POS provider is configured. Use CSV import or configure a POS adapter.');
+  }
+}
+
 export class IntegrationService {
+  private static posAdapter: PosAdapter = new UnavailablePosAdapter();
+
+  public static setPosAdapter(adapter: PosAdapter) {
+    this.posAdapter = adapter;
+  }
   /**
    * Process a CSV or file import of inventory items for a pharmacy.
    */
@@ -86,9 +104,17 @@ export class IntegrationService {
       let unitPriceMinor: number | undefined;
       if (row.unit_price !== undefined) {
         const p = Number(row.unit_price);
-        if (!isNaN(p) && p >= 0) {
-          unitPriceMinor = Math.round(p * 100);
+        if (!Number.isFinite(p) || p < 0) {
+          rejectedCount++;
+          rejectedDetails.push({ row: rowNum, medicine_name: rawName, reason: `Invalid unit price: "${row.unit_price}". Must be >= 0.` });
+          continue;
         }
+        unitPriceMinor = Math.round(p * 100);
+      }
+      if (row.external_product_id !== undefined && !String(row.external_product_id).trim()) {
+        rejectedCount++;
+        rejectedDetails.push({ row: rowNum, medicine_name: rawName, reason: 'External product ID cannot be empty when provided.' });
+        continue;
       }
 
       try {
@@ -157,10 +183,40 @@ export class IntegrationService {
    * Helper to parse CSV string into row objects
    */
   public static parseCSV(csvContent: string): CSVImportRow[] {
-    const lines = csvContent.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+    const records: string[][] = [];
+    let row: string[] = [];
+    let field = '';
+    let quoted = false;
+    for (let i = 0; i < csvContent.length; i++) {
+      const char = csvContent[i];
+      if (char === '"') {
+        if (quoted && csvContent[i + 1] === '"') {
+          field += '"';
+          i++;
+        } else {
+          quoted = !quoted;
+        }
+      } else if (char === ',' && !quoted) {
+        row.push(field.trim());
+        field = '';
+      } else if ((char === '\n' || char === '\r') && !quoted) {
+        if (char === '\r' && csvContent[i + 1] === '\n') i++;
+        row.push(field.trim());
+        if (row.some((value) => value !== '')) records.push(row);
+        row = [];
+        field = '';
+      } else {
+        field += char;
+      }
+    }
+    if (field || row.length) {
+      row.push(field.trim());
+      if (row.some((value) => value !== '')) records.push(row);
+    }
+    const lines = records;
     if (lines.length < 2) return [];
 
-    const header = lines[0].split(',').map((h) => h.trim().toLowerCase());
+    const header = lines[0].map((h) => h.trim().toLowerCase());
     const nameIdx = header.findIndex((h) => h.includes('medicine') || h.includes('name') || h.includes('drug') || h.includes('item'));
     const qtyIdx = header.findIndex((h) => h.includes('qty') || h.includes('quantity') || h.includes('stock'));
     const priceIdx = header.findIndex((h) => h.includes('price') || h.includes('cost') || h.includes('unit'));
@@ -168,7 +224,7 @@ export class IntegrationService {
 
     const rows: CSVImportRow[] = [];
     for (let i = 1; i < lines.length; i++) {
-      const parts = lines[i].split(',').map((p) => p.trim().replace(/^["']|["']$/g, ''));
+      const parts = lines[i];
       if (parts.length === 0 || (parts.length === 1 && !parts[0])) continue;
 
       rows.push({
@@ -187,19 +243,22 @@ export class IntegrationService {
     terminalId: string = 'POS-TERMINAL-01',
     actorUserId?: string
   ): Promise<ImportResult> {
-    const defaultPosItems: CSVImportRow[] = [
-      { medicine_name: 'Paracetamol 500mg', quantity: 50, unit_price: 12.50, external_product_id: `${terminalId}-SKU-101` },
-      { medicine_name: 'Amoxicillin 500mg', quantity: 30, unit_price: 45.00, external_product_id: `${terminalId}-SKU-102` },
-      { medicine_name: 'Coartem 20mg/120mg', quantity: 40, unit_price: 35.00, external_product_id: `${terminalId}-SKU-103` },
-      { medicine_name: 'Ibuprofen 400mg', quantity: 60, unit_price: 18.00, external_product_id: `${terminalId}-SKU-104` },
-      { medicine_name: 'Cetirizine 10mg', quantity: 75, unit_price: 15.00, external_product_id: `${terminalId}-SKU-105` },
-    ];
-    return this.processFileImport(pharmacyId, defaultPosItems, actorUserId);
+    const rows = await this.posAdapter.sync({ pharmacyId, terminalId });
+    return this.processFileImport(pharmacyId, rows, actorUserId);
   }
 
   public static async getSyncHistory(pharmacyId: string) {
     const res = await db.query(
       `SELECT * FROM inventory_syncs WHERE pharmacy_id = $1 ORDER BY started_at DESC LIMIT 20`,
+      [pharmacyId]
+    );
+    return res.rows;
+  }
+
+  public static async getConnections(pharmacyId: string) {
+    const res = await db.query(
+      `SELECT id, pharmacy_id, provider_name, provider_type, status, last_sync_at, last_error, created_at, updated_at
+       FROM integration_connections WHERE pharmacy_id = $1 ORDER BY created_at DESC`,
       [pharmacyId]
     );
     return res.rows;

@@ -7,6 +7,9 @@ import { OrderService } from '../modules/order/order.service.js';
 import { InventoryService } from '../modules/inventory/inventory.service.js';
 import { PrescriptionService } from '../modules/prescription/prescription.service.js';
 import { IntegrationService } from '../modules/integration/integration.service.js';
+import { paymentRouter } from '../modules/payment/payment.router.js';
+import { NotificationService } from '../modules/notification/notification.service.js';
+import { AuditService } from '../modules/audit/audit.service.js';
 import { sendSuccess } from '../common/response.js';
 import {
   authenticateJwt,
@@ -15,8 +18,26 @@ import {
   requireRoles,
 } from '../common/middleware.js';
 import { ValidationError, NotFoundError, ForbiddenError } from '../common/errors.js';
+import multer from 'multer';
 
 export const v1Router = Router();
+
+const prescriptionUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024, files: 1 },
+  fileFilter: (_req, file, callback) => {
+    callback(null, ['application/pdf', 'image/jpeg', 'image/png'].includes(file.mimetype));
+  },
+});
+
+function handlePrescriptionUpload(req: Request, res: Response, next: NextFunction) {
+  prescriptionUpload.single('file')(req, res, (err: any) => {
+    if (err) return next(new ValidationError(err.message || 'Invalid prescription upload.'));
+    next();
+  });
+}
+
+v1Router.use('/payments', paymentRouter);
 
 // ==========================================
 // 1. AUTH ROUTES
@@ -61,6 +82,49 @@ v1Router.get('/pharmacies', async (_req: Request, res: Response, next: NextFunct
   try {
     const list = await PharmacyService.listPharmacies('VERIFIED');
     return sendSuccess(res, list);
+  } catch (err) {
+    next(err);
+  }
+});
+
+v1Router.get('/platform/pharmacies', authenticateJwt, requireRoles('PLATFORM_OPS'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const rawStatus = req.query.status ? String(req.query.status).toUpperCase() : undefined;
+    const allowedStatuses = ['PENDING', 'VERIFIED', 'REJECTED', 'SUSPENDED'];
+    if (rawStatus && !allowedStatuses.includes(rawStatus)) {
+      throw new ValidationError('Invalid pharmacy verification status.');
+    }
+    const list = await PharmacyService.listAllPharmacies(rawStatus as any);
+    return sendSuccess(res, list);
+  } catch (err) {
+    next(err);
+  }
+});
+
+v1Router.patch('/platform/pharmacies/:id/verification', authenticateJwt, requireRoles('PLATFORM_OPS'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const status = String(req.body?.verification_status || '').toUpperCase();
+    const allowedStatuses = ['PENDING', 'VERIFIED', 'REJECTED', 'SUSPENDED'];
+    if (!allowedStatuses.includes(status)) {
+      throw new ValidationError('verification_status must be PENDING, VERIFIED, REJECTED, or SUSPENDED.');
+    }
+    const pharmacy = await PharmacyService.updateVerificationStatus(
+      req.params.id,
+      status as any,
+      req.user!.id
+    );
+    return sendSuccess(res, pharmacy);
+  } catch (err) {
+    next(err);
+  }
+});
+
+v1Router.get('/platform/audit', authenticateJwt, requireRoles('PLATFORM_OPS'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const requestedLimit = Number(req.query.limit || 30);
+    const limit = Number.isFinite(requestedLimit) ? Math.min(Math.max(requestedLimit, 1), 100) : 30;
+    const events = await AuditService.listEvents(undefined, undefined, undefined, limit);
+    return sendSuccess(res, events);
   } catch (err) {
     next(err);
   }
@@ -297,11 +361,56 @@ v1Router.post('/inventory/pos-sync', authenticateJwt, requirePharmacyStaff, asyn
 
 v1Router.get('/integrations', authenticateJwt, requirePharmacyStaff, async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const history = await IntegrationService.getSyncHistory(req.pharmacyId!);
+    const [connections, history] = await Promise.all([
+      IntegrationService.getConnections(req.pharmacyId!),
+      IntegrationService.getSyncHistory(req.pharmacyId!),
+    ]);
     return sendSuccess(res, {
-      connections: [],
+      connections,
       sync_history: history,
     });
+  } catch (err) {
+    next(err);
+  }
+});
+
+v1Router.get('/notifications', authenticateJwt, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    return sendSuccess(res, await NotificationService.getUserNotifications(req.user!.id));
+  } catch (err) {
+    next(err);
+  }
+});
+
+v1Router.get('/notifications/preferences', authenticateJwt, requireRoles('CUSTOMER'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    return sendSuccess(res, await NotificationService.getUserPreferences(req.user!.id));
+  } catch (err) {
+    next(err);
+  }
+});
+
+v1Router.patch('/notifications/preferences', authenticateJwt, requireRoles('CUSTOMER'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const enabled = req.body?.browser_push_enabled;
+    if (typeof enabled !== 'boolean') throw new ValidationError('browser_push_enabled must be a boolean.');
+    return sendSuccess(res, await NotificationService.updateUserPreferences(req.user!.id, enabled));
+  } catch (err) {
+    next(err);
+  }
+});
+
+v1Router.patch('/notifications/:id/read', authenticateJwt, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    return sendSuccess(res, await NotificationService.markAsRead(req.params.id, req.user!.id));
+  } catch (err) {
+    next(err);
+  }
+});
+
+v1Router.post('/notifications/:id/retry', authenticateJwt, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    return sendSuccess(res, await NotificationService.retryForUser(req.params.id, req.user!.id));
   } catch (err) {
     next(err);
   }
@@ -310,9 +419,20 @@ v1Router.get('/integrations', authenticateJwt, requirePharmacyStaff, async (req:
 // ==========================================
 // 7. PRESCRIPTION ROUTES
 // ==========================================
-v1Router.post('/prescriptions', authenticateJwt, async (req: Request, res: Response, next: NextFunction) => {
+v1Router.get('/prescriptions/pending', authenticateJwt, requireRoles('PHARMACY_ADMIN', 'PHARMACY_STAFF'), requirePharmacyStaff, async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const prescription = await PrescriptionService.uploadPrescription(req.user!.id, req.body);
+    const prescriptions = await PrescriptionService.listPendingForPharmacy(
+      req.user?.role === 'PLATFORM_OPS' ? undefined : req.pharmacyId
+    );
+    return sendSuccess(res, prescriptions);
+  } catch (err) {
+    next(err);
+  }
+});
+
+v1Router.post('/prescriptions', authenticateJwt, handlePrescriptionUpload, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const prescription = await PrescriptionService.uploadPrescriptionFile(req.user!.id, req.body.order_id, req.file!);
     return sendSuccess(res, prescription, 201);
   } catch (err) {
     next(err);
@@ -333,7 +453,21 @@ v1Router.get('/prescriptions/:id', authenticateJwt, async (req: Request, res: Re
   }
 });
 
-v1Router.post('/prescriptions/:id/review', authenticateJwt, requirePharmacyStaff, async (req: Request, res: Response, next: NextFunction) => {
+v1Router.get('/prescriptions/:id/file', authenticateJwt, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const file = await PrescriptionService.getPrescriptionFile(
+      req.params.id,
+      req.user!.id,
+      req.user!.role,
+      req.pharmacyId
+    );
+    return res.sendFile(file.filePath, { headers: { 'Content-Type': file.mimeType, 'Content-Disposition': 'inline' } });
+  } catch (err) {
+    next(err);
+  }
+});
+
+v1Router.post('/prescriptions/:id/review', authenticateJwt, requireRoles('PHARMACY_ADMIN', 'PHARMACY_STAFF'), requirePharmacyStaff, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const prescription = await PrescriptionService.reviewPrescription(
       req.params.id,

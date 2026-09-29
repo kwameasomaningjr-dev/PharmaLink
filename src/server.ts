@@ -1,5 +1,6 @@
 import { createApp } from './app.js';
 import { seedDatabase } from './database/seed.js';
+import { assertSecurityConfiguration } from './common/middleware.js';
 import dotenv from 'dotenv';
 
 dotenv.config();
@@ -8,8 +9,9 @@ const PORT = process.env.PORT || 4000;
 
 async function startServer() {
   try {
+    assertSecurityConfiguration();
     console.log('[Server] Initializing database & seed data...');
-    await seedDatabase(true);
+    await seedDatabase(process.env.NODE_ENV === 'test');
 
     const app = createApp();
     const server = app.listen(PORT, () => {

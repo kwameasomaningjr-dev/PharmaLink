@@ -71,16 +71,13 @@ export class PharmacyService {
       ]
     );
 
-    // Link creator as ADMIN
+    // Keep the applicant separate from active pharmacy staff until verification.
     await db.query(
       `INSERT INTO pharmacy_users (id, pharmacy_id, user_id, role, status)
-       VALUES ($1, $2, $3, 'ADMIN', 'ACTIVE')
+       VALUES ($1, $2, $3, 'ADMIN', 'INVITED')
        ON CONFLICT (pharmacy_id, user_id) DO NOTHING`,
       [uuidv4(), pharmacyId, creatorUserId]
     );
-
-    // Update user role to PHARMACY_ADMIN if needed
-    await db.query(`UPDATE users SET role = 'PHARMACY_ADMIN' WHERE id = $1 AND role = 'CUSTOMER'`, [creatorUserId]);
 
     await AuditService.recordEvent({
       actorUserId: creatorUserId,
@@ -172,5 +169,60 @@ export class PharmacyService {
       [verificationStatus]
     );
     return res.rows;
+  }
+
+  public static async listAllPharmacies(verificationStatus?: PharmacyVerificationStatus) {
+    const params: string[] = [];
+    let where = '';
+    if (verificationStatus) {
+      params.push(verificationStatus);
+      where = 'WHERE verification_status = $1';
+    }
+
+    const res = await db.query(
+      `SELECT id, legal_name, display_name, license_number, address_line, city, region,
+              latitude, longitude, phone, email, fulfillment_options, opening_hours,
+              verification_status, created_at, updated_at
+       FROM pharmacies
+       ${where}
+       ORDER BY updated_at DESC, display_name ASC`,
+      params
+    );
+    return res.rows;
+  }
+
+  public static async updateVerificationStatus(
+    pharmacyId: string,
+    verificationStatus: PharmacyVerificationStatus,
+    actorUserId: string
+  ): Promise<Pharmacy> {
+    const pharmacy = await this.getPharmacyById(pharmacyId);
+    if (!pharmacy) throw new NotFoundError('Pharmacy');
+
+    const allowedStatuses: PharmacyVerificationStatus[] = ['PENDING', 'VERIFIED', 'REJECTED', 'SUSPENDED'];
+    if (!allowedStatuses.includes(verificationStatus)) {
+      throw new ValidationError('Invalid pharmacy verification status.');
+    }
+
+    await db.query(
+      `UPDATE pharmacies
+       SET verification_status = $1, updated_at = CURRENT_TIMESTAMP
+       WHERE id = $2`,
+      [verificationStatus, pharmacyId]
+    );
+
+    await AuditService.recordEvent({
+      actorUserId,
+      pharmacyId,
+      eventType: 'PHARMACY_VERIFICATION_UPDATED',
+      entityType: 'PHARMACY',
+      entityId: pharmacyId,
+      metadata: {
+        previous_status: pharmacy.verification_status,
+        new_status: verificationStatus,
+      },
+    });
+
+    return (await this.getPharmacyById(pharmacyId))!;
   }
 }

@@ -156,6 +156,8 @@ CREATE TABLE IF NOT EXISTS orders (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivery_address TEXT;
+
 -- 14. ORDER_ITEMS
 CREATE TABLE IF NOT EXISTS order_items (
   id UUID PRIMARY KEY,
@@ -228,13 +230,29 @@ CREATE TABLE IF NOT EXISTS notifications (
   id UUID PRIMARY KEY,
   user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   type VARCHAR(100) NOT NULL,
-  channel VARCHAR(50) NOT NULL, -- SMS, EMAIL, WHATSAPP, PUSH
+  channel VARCHAR(50) NOT NULL, -- IN_APP, SMS, EMAIL, WHATSAPP, PUSH
   status VARCHAR(50) NOT NULL DEFAULT 'QUEUED', -- QUEUED, SENT, FAILED
   reference_type VARCHAR(100),
   reference_id UUID,
   provider_message_id VARCHAR(255),
+  idempotency_key VARCHAR(255) NOT NULL UNIQUE,
+  attempt_count INTEGER NOT NULL DEFAULT 0,
+  last_error TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  sent_at TIMESTAMPTZ
+  sent_at TIMESTAMPTZ,
+  read_at TIMESTAMPTZ
+);
+
+ALTER TABLE notifications ADD COLUMN IF NOT EXISTS idempotency_key VARCHAR(255);
+ALTER TABLE notifications ADD COLUMN IF NOT EXISTS attempt_count INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE notifications ADD COLUMN IF NOT EXISTS last_error TEXT;
+ALTER TABLE notifications ADD COLUMN IF NOT EXISTS read_at TIMESTAMPTZ;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_notifications_idempotency ON notifications(idempotency_key);
+
+CREATE TABLE IF NOT EXISTS user_notification_preferences (
+  user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  browser_push_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 -- 20. AUDIT_EVENTS
@@ -264,3 +282,12 @@ CREATE INDEX IF NOT EXISTS idx_orders_pharmacy ON orders(pharmacy_id, status, cr
 CREATE INDEX IF NOT EXISTS idx_reservations_status ON reservations(inventory_id, status, expires_at);
 CREATE INDEX IF NOT EXISTS idx_payments_order ON payments(order_id);
 CREATE INDEX IF NOT EXISTS idx_payments_provider_ref ON payments(provider_reference);
+
+CREATE TABLE IF NOT EXISTS payment_webhook_events (
+  id UUID PRIMARY KEY,
+  provider VARCHAR(100) NOT NULL,
+  provider_event_id VARCHAR(255) NOT NULL,
+  payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+  received_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT uq_payment_webhook_event UNIQUE (provider, provider_event_id)
+);

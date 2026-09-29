@@ -50,7 +50,7 @@ export type PaymentStatus =
   | 'REFUNDED'
   | 'PARTIALLY_REFUNDED';
 
-export type NotificationChannel = 'SMS' | 'EMAIL' | 'WHATSAPP' | 'PUSH';
+export type NotificationChannel = 'IN_APP' | 'SMS' | 'EMAIL' | 'WHATSAPP' | 'PUSH';
 export type NotificationStatus = 'QUEUED' | 'SENT' | 'FAILED';
 
 export interface User {

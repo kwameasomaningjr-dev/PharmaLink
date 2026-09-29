@@ -23,11 +23,30 @@ declare global {
       requestId?: string;
       user?: AuthUser;
       pharmacyId?: string;
+      rawBody?: string;
     }
   }
 }
 
-const JWT_SECRET = process.env.JWT_SECRET || 'pharmalink_dev_jwt_secret_key_change_in_production_min_32_chars';
+const DEVELOPMENT_JWT_SECRET = 'pharmalink_dev_jwt_secret_key_change_in_production_min_32_chars';
+
+function getJwtSecret(): string {
+  return process.env.JWT_SECRET?.trim() || DEVELOPMENT_JWT_SECRET;
+}
+
+export function assertSecurityConfiguration(): void {
+  if (process.env.NODE_ENV !== 'production') return;
+
+  const secret = process.env.JWT_SECRET?.trim();
+  if (!secret || secret.length < 32 || secret === DEVELOPMENT_JWT_SECRET) {
+    throw new Error('JWT_SECRET must be a unique value of at least 32 characters in production.');
+  }
+
+  const corsOrigin = process.env.CORS_ORIGIN?.trim();
+  if (!corsOrigin || corsOrigin === '*') {
+    throw new Error('CORS_ORIGIN must explicitly list the trusted production frontend origin(s).');
+  }
+}
 
 export function requestIdMiddleware(req: Request, res: Response, next: NextFunction) {
   const reqId = (req.headers['x-request-id'] as string) || `req_${uuidv4()}`;
@@ -49,7 +68,7 @@ export function generateToken(user: AuthUser, expiresIn = '7d'): string {
       pharmacy_id: user.pharmacy_id,
       pharmacy_role: user.pharmacy_role,
     },
-    JWT_SECRET,
+    getJwtSecret(),
     { expiresIn: expiresIn as any }
   );
 }
@@ -62,7 +81,7 @@ export async function authenticateJwt(req: Request, res: Response, next: NextFun
 
   const token = authHeader.substring(7);
   try {
-    const payload = jwt.verify(token, JWT_SECRET) as any;
+    const payload = jwt.verify(token, getJwtSecret()) as any;
     req.user = {
       id: payload.id,
       email: payload.email,
@@ -90,7 +109,7 @@ export function optionalAuthenticateJwt(req: Request, _res: Response, next: Next
   if (authHeader && authHeader.startsWith('Bearer ')) {
     const token = authHeader.substring(7);
     try {
-      const payload = jwt.verify(token, JWT_SECRET) as any;
+      const payload = jwt.verify(token, getJwtSecret()) as any;
       req.user = {
         id: payload.id,
         email: payload.email,
@@ -123,7 +142,7 @@ export function requireRoles(...allowedRoles: UserRole[]) {
   };
 }
 
-export function requirePharmacyStaff(req: Request, _res: Response, next: NextFunction) {
+export async function requirePharmacyStaff(req: Request, _res: Response, next: NextFunction) {
   if (!req.user) {
     return next(new UnauthorizedError());
   }
@@ -140,8 +159,25 @@ export function requirePharmacyStaff(req: Request, _res: Response, next: NextFun
     return next(new ForbiddenError('No pharmacy associated with this account'));
   }
 
-  req.pharmacyId = req.user.pharmacy_id;
-  next();
+  try {
+    const pharmacyRes = await db.query(
+      `SELECT p.verification_status, pu.status AS staff_status
+       FROM pharmacies p
+       JOIN pharmacy_users pu ON pu.pharmacy_id = p.id
+       WHERE p.id = $1 AND pu.user_id = $2`,
+      [req.user.pharmacy_id, req.user.id]
+    );
+
+    const pharmacy = pharmacyRes.rows[0];
+    if (!pharmacy || pharmacy.staff_status !== 'ACTIVE' || pharmacy.verification_status !== 'VERIFIED') {
+      return next(new ForbiddenError('Access requires active staff membership at a verified pharmacy'));
+    }
+
+    req.pharmacyId = req.user.pharmacy_id;
+    return next();
+  } catch (err) {
+    return next(err);
+  }
 }
 
 export function errorHandler(err: any, req: Request, res: Response, _next: NextFunction) {

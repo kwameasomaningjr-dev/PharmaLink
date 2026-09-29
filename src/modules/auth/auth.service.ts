@@ -48,6 +48,12 @@ export class AuthService {
     if (!input.first_name || input.first_name.trim() === '') {
       throw new ValidationError('First name is required.');
     }
+    if (input.role && input.role !== 'CUSTOMER') {
+      throw new ValidationError('Public registration can only create customer accounts.');
+    }
+    if (input.pharmacy_id) {
+      throw new ValidationError('Pharmacy staff accounts must be invited by a pharmacy administrator.');
+    }
 
     const cleanEmail = input.email ? input.email.toLowerCase().trim() : null;
     const cleanPhone = normalizePhone(input.phone);
@@ -72,7 +78,7 @@ export class AuthService {
 
     const userId = uuidv4();
     const passwordHash = await bcrypt.hash(input.password, 10);
-    const role: UserRole = input.role || 'CUSTOMER';
+    const role: UserRole = 'CUSTOMER';
 
     await db.query(
       `INSERT INTO users (id, email, phone, password_hash, role, first_name, last_name, status)
@@ -88,19 +94,9 @@ export class AuthService {
       ]
     );
 
-    let pharmacyRole: 'ADMIN' | 'STAFF' | undefined;
-    if (input.pharmacy_id && (role === 'PHARMACY_ADMIN' || role === 'PHARMACY_STAFF')) {
-      pharmacyRole = role === 'PHARMACY_ADMIN' ? 'ADMIN' : 'STAFF';
-      await db.query(
-        `INSERT INTO pharmacy_users (id, pharmacy_id, user_id, role, status)
-         VALUES ($1, $2, $3, $4, 'ACTIVE')`,
-        [uuidv4(), input.pharmacy_id, userId, pharmacyRole]
-      );
-    }
-
     await AuditService.recordEvent({
       actorUserId: userId,
-      pharmacyId: input.pharmacy_id || null,
+      pharmacyId: null,
       eventType: 'USER_REGISTERED',
       entityType: 'USER',
       entityId: userId,
@@ -114,8 +110,6 @@ export class AuthService {
       role,
       first_name: input.first_name,
       last_name: input.last_name || null,
-      pharmacy_id: input.pharmacy_id,
-      pharmacy_role: pharmacyRole,
     };
 
     const token = generateToken(authUser);
@@ -172,20 +166,12 @@ export class AuthService {
     } catch {
       match = false;
     }
-    if (!match && input.password === 'Password123!') {
-      match = true;
-    }
     if (!match) {
       throw new UnauthorizedError('Invalid email/phone or password.');
     }
 
     if (row.status !== 'ACTIVE') {
-      if (input.password === 'Password123!') {
-        row.status = 'ACTIVE';
-        await db.query(`UPDATE users SET status = 'ACTIVE' WHERE id = $1`, [row.id]);
-      } else {
-        throw new UnauthorizedError('Your account has been suspended or deactivated.');
-      }
+      throw new UnauthorizedError('Your account has been suspended or deactivated.');
     }
 
     let pharmacyInfo: any = null;
