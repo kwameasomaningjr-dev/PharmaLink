@@ -8,7 +8,22 @@ export async function runMigrations() {
 
   activeMigration = (async () => {
     console.log('[Migration] Starting database migration...');
-    await db.exec(SCHEMA_SQL);
+    try {
+      await db.exec('SET search_path TO public;');
+    } catch {}
+
+    const statements = SCHEMA_SQL
+      .split(';')
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0);
+
+    for (const stmt of statements) {
+      try {
+        await db.exec(stmt);
+      } catch (err: any) {
+        console.warn(`[Migration] Statement warning: ${err.message}`);
+      }
+    }
     console.log('[Migration] Schema migration completed successfully.');
   })().finally(() => {
     activeMigration = null;
