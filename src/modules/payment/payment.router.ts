@@ -32,15 +32,34 @@ paymentRouter.get('/:id', authenticateJwt, async (req: Request, res: Response, n
 
 paymentRouter.post('/webhooks/:provider', async (req: Request, res: Response, next: NextFunction) => {
   try {
+    const provider = req.params.provider.toLowerCase();
     const payload = req.rawBody || JSON.stringify(req.body);
+    const signature = req.header('x-paystack-signature') || req.header('x-provider-signature');
+
+    let providerEventId = req.header('X-Provider-Event-Id') || '';
+    let providerReference = String(req.body.provider_reference || '');
+    let status: PaymentStatus = String(req.body.status || '').toUpperCase() as PaymentStatus;
+
+    if (provider === 'paystack' && req.body?.data) {
+      providerReference = String(req.body.data.reference || providerReference);
+      providerEventId = String(req.body.data.id || req.body.event || `evt_${Date.now()}`);
+      if (req.body.event === 'charge.success' || req.body.data.status === 'success') {
+        status = 'SUCCESS';
+      } else if (req.body.data.status === 'failed') {
+        status = 'FAILED';
+      } else {
+        status = 'PENDING';
+      }
+    }
+
     const payment = await PaymentService.handleWebhook(
-      req.params.provider,
+      provider,
       payload,
-      req.header('X-Provider-Signature'),
+      signature,
       {
-        providerEventId: req.header('X-Provider-Event-Id') || '',
-        providerReference: String(req.body.provider_reference || ''),
-        status: String(req.body.status).toUpperCase() as PaymentStatus,
+        providerEventId: providerEventId || `evt_${Date.now()}`,
+        providerReference,
+        status,
       }
     );
     return sendSuccess(res, payment);

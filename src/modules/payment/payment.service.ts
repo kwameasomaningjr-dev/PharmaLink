@@ -19,9 +19,11 @@ function canTransitionPayment(current: PaymentStatus, next: PaymentStatus): bool
 
 export interface PaymentProvider {
   readonly name: string;
-  initiate(input: { paymentId: string; amountMinor: number; currency: string; orderId: string }): Promise<{
+  initiate(input: { paymentId: string; amountMinor: number; currency: string; orderId: string; customerEmail?: string; callbackUrl?: string }): Promise<{
     status: PaymentStatus;
     providerReference: string | null;
+    authorizationUrl?: string;
+    accessCode?: string;
   }>;
   verifyWebhook(payload: string, signature: string | undefined): boolean;
 }
@@ -38,8 +40,12 @@ class UnavailablePaymentProvider implements PaymentProvider {
   }
 }
 
+import { PaystackProvider } from './providers/paystack.provider.js';
+
 export class PaymentService {
-  private static provider: PaymentProvider = new UnavailablePaymentProvider();
+  private static provider: PaymentProvider = process.env.PAYSTACK_SECRET_KEY
+    ? new PaystackProvider(process.env.PAYSTACK_SECRET_KEY, process.env.PAYSTACK_PUBLIC_KEY)
+    : new UnavailablePaymentProvider();
 
   public static setProvider(provider: PaymentProvider) {
     this.provider = provider;
@@ -115,7 +121,12 @@ export class PaymentService {
       metadata: { status: providerResult.status, provider: this.provider.name, idempotency_key: normalizedKey },
     });
 
-    return (await db.query(`SELECT * FROM payments WHERE id = $1`, [paymentId])).rows[0];
+    const payment = (await db.query(`SELECT * FROM payments WHERE id = $1`, [paymentId])).rows[0];
+    return {
+      ...payment,
+      authorization_url: providerResult.authorizationUrl,
+      access_code: providerResult.accessCode,
+    };
   }
 
   public static async getPayment(customerId: string, paymentId: string) {

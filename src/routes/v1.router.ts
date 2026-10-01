@@ -7,6 +7,7 @@ import { OrderService } from '../modules/order/order.service.js';
 import { InventoryService } from '../modules/inventory/inventory.service.js';
 import { PrescriptionService } from '../modules/prescription/prescription.service.js';
 import { IntegrationService } from '../modules/integration/integration.service.js';
+import { integrationRouter } from '../modules/integration/integration.router.js';
 import { paymentRouter } from '../modules/payment/payment.router.js';
 import { NotificationService } from '../modules/notification/notification.service.js';
 import { AuditService } from '../modules/audit/audit.service.js';
@@ -38,6 +39,7 @@ function handlePrescriptionUpload(req: Request, res: Response, next: NextFunctio
 }
 
 v1Router.use('/payments', paymentRouter);
+v1Router.use('/integrations', integrationRouter);
 
 // ==========================================
 // 1. AUTH ROUTES

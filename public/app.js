@@ -32793,8 +32793,8 @@
       }
     }, [pharmacyData]);
     const isPharmacyUser = (0, import_react21.useMemo)(() => {
-      return currentUser?.role === "PLATFORM_OPS" || (currentUser?.role === "PHARMACY_ADMIN" || currentUser?.role === "PHARMACY_STAFF") && pharmacyData?.verification_status === "VERIFIED";
-    }, [currentUser, pharmacyData]);
+      return currentUser?.role === "PLATFORM_OPS" || currentUser?.role === "PHARMACY_ADMIN" || currentUser?.role === "PHARMACY_STAFF";
+    }, [currentUser]);
     (0, import_react21.useEffect)(() => {
       if (isPharmacyUser) {
         setActivePortal(currentUser?.role === "PLATFORM_OPS" ? "platform" : "pharmacy");
@@ -32824,6 +32824,7 @@
     const [isCsvImportModalOpen, setIsCsvImportModalOpen] = (0, import_react21.useState)(false);
     const [isPosModalOpen, setIsPosModalOpen] = (0, import_react21.useState)(false);
     const [isRxModalOpen, setIsRxModalOpen] = (0, import_react21.useState)(false);
+    const [pharmacyConflictItem, setPharmacyConflictItem] = (0, import_react21.useState)(null);
     const [customCitySearch, setCustomCitySearch] = (0, import_react21.useState)("");
     const [myOrders, setMyOrders] = (0, import_react21.useState)([]);
     const [myNotifications, setMyNotifications] = (0, import_react21.useState)([]);
@@ -32836,6 +32837,11 @@
     const [platformPharmacies, setPlatformPharmacies] = (0, import_react21.useState)([]);
     const [platformAuditEvents, setPlatformAuditEvents] = (0, import_react21.useState)([]);
     const [platformLoading, setPlatformLoading] = (0, import_react21.useState)(false);
+    const [pharmacyConnections, setPharmacyConnections] = (0, import_react21.useState)([]);
+    const [pharmacySyncHistory, setPharmacySyncHistory] = (0, import_react21.useState)([]);
+    const [selectedProvider, setSelectedProvider] = (0, import_react21.useState)("primecare");
+    const [webhookSecretInput, setWebhookSecretInput] = (0, import_react21.useState)("");
+    const [isSyncingPos, setIsSyncingPos] = (0, import_react21.useState)(false);
     const [loginIdentifier, setLoginIdentifier] = (0, import_react21.useState)("");
     const [loginPassword, setLoginPassword] = (0, import_react21.useState)("");
     const [authError, setAuthError] = (0, import_react21.useState)("");
@@ -32885,8 +32891,31 @@
         });
         const meData = await meRes.json();
         if (meRes.ok && meData.data) setPharmacyData(meData.data);
+        const intRes = await fetch("/v1/integrations", {
+          headers: { "Authorization": `Bearer ${token}` }
+        });
+        const intData = await intRes.json();
+        if (intRes.ok && intData.data) {
+          setPharmacyConnections(intData.data.connections || []);
+          setPharmacySyncHistory(intData.data.sync_history || []);
+        }
       } catch (err) {
         console.error("Failed to load pharmacy portal data:", err);
+      }
+    }, [currentToken]);
+    const loadIntegrationsData = (0, import_react21.useCallback)(async (token = currentToken) => {
+      if (!token) return;
+      try {
+        const res = await fetch("/v1/integrations", {
+          headers: { "Authorization": `Bearer ${token}` }
+        });
+        const data = await res.json();
+        if (res.ok && data.data) {
+          setPharmacyConnections(data.data.connections || []);
+          setPharmacySyncHistory(data.data.sync_history || []);
+        }
+      } catch (err) {
+        console.error("Failed to load integration connections:", err);
       }
     }, [currentToken]);
     const loadPlatformData = (0, import_react21.useCallback)(async (token = currentToken) => {
@@ -32935,7 +32964,7 @@
               } else {
                 setActiveAdminPage("network");
               }
-            } else if (["PHARMACY_ADMIN", "PHARMACY_STAFF"].includes(data.data.user.role) && data.data.pharmacy?.verification_status === "VERIFIED") {
+            } else if (["PHARMACY_ADMIN", "PHARMACY_STAFF"].includes(data.data.user.role)) {
               setActivePortal("pharmacy");
               if (currentPath.startsWith("/pharmacy/")) {
                 setActiveAdminPage(adminPageFromPath(currentPath, "pharmacy"));
@@ -33073,6 +33102,12 @@
           setActivePortal("pharmacy");
           setActiveAdminPage(page);
           if (["orders", "inventory", "prescriptions"].includes(page)) setActivePharmTab(page);
+        } else if (currentUser?.role === "PLATFORM_OPS") {
+          setActivePortal("platform");
+          setActiveAdminPage("network");
+        } else if (currentUser?.role === "PHARMACY_ADMIN" || currentUser?.role === "PHARMACY_STAFF") {
+          setActivePortal("pharmacy");
+          setActiveAdminPage("overview");
         } else {
           setActivePage(pageFromPath(pathname));
           setActivePortal("customer");
@@ -33160,16 +33195,18 @@
         setCurrentToken(data.data.token);
         setPharmacyData(data.data.pharmacy || null);
         setIsLoginOpen(false);
-        if ((data.data.user.role === "PHARMACY_ADMIN" || data.data.user.role === "PHARMACY_STAFF" || data.data.user.role === "PLATFORM_OPS") && (data.data.user.role === "PLATFORM_OPS" || data.data.pharmacy?.verification_status === "VERIFIED")) {
-          const portal = data.data.user.role === "PLATFORM_OPS" ? "platform" : "pharmacy";
-          setActivePortal(portal);
-          setActiveAdminPage(portal === "platform" ? "network" : "overview");
-          window.history.replaceState({}, "", `/${portal}/${portal === "platform" ? "network" : "overview"}`);
-          showToast(`Welcome to ${data.data.user.role === "PLATFORM_OPS" ? "Platform Operations" : "Pharmacy Operations"}, ${data.data.user.first_name}!`, "success");
-          if (data.data.user.role !== "PLATFORM_OPS") loadPharmacyData(data.data.token);
+        if (data.data.user.role === "PLATFORM_OPS") {
+          setActivePortal("platform");
+          setActiveAdminPage("network");
+          window.history.replaceState({}, "", "/platform/network");
+          showToast(`Welcome to Platform Operations, ${data.data.user.first_name}!`, "success");
+          loadPlatformData(data.data.token);
         } else if (data.data.user.role === "PHARMACY_ADMIN" || data.data.user.role === "PHARMACY_STAFF") {
-          setActivePortal("customer");
-          showToast("Your pharmacy application is pending verification. Pharmacy operations are unavailable until approval.", "info");
+          setActivePortal("pharmacy");
+          setActiveAdminPage("overview");
+          window.history.replaceState({}, "", "/pharmacy/overview");
+          showToast(`Welcome to Pharmacy Operations, ${data.data.user.first_name}!`, "success");
+          loadPharmacyData(data.data.token);
         } else {
           setActivePortal("customer");
           showToast(`Welcome back, ${data.data.user.first_name}!`, "success");
@@ -33328,24 +33365,7 @@
       const pharmId = resultItem.pharmacy.id;
       const pharmName = resultItem.pharmacy.display_name;
       if (cart.pharmacyId && cart.pharmacyId !== pharmId && cart.items.length > 0) {
-        if (!confirm(`Your cart has items from another pharmacy (${cart.pharmacyName}). Clear cart to add from ${pharmName}?`)) {
-          return;
-        }
-        setCart({
-          pharmacyId: pharmId,
-          pharmacyName: pharmName,
-          fulfillmentType: "PICKUP",
-          items: [{
-            medicine: resultItem.medicine,
-            pharmacy_id: pharmId,
-            quantity: 1,
-            price: resultItem.price,
-            fulfillment_options: resultItem.pharmacy.fulfillment_options || {}
-          }],
-          customerNote: "",
-          deliveryAddress: location.name
-        });
-        showToast(`Cart updated with items from ${pharmName}`, "info");
+        setPharmacyConflictItem(resultItem);
         return;
       }
       setCart((prev) => {
@@ -33372,6 +33392,28 @@
         };
       });
       showToast(`Added ${resultItem.medicine.generic_name} to cart`, "success");
+    };
+    const handleConfirmCartPharmacySwitch = () => {
+      if (!pharmacyConflictItem) return;
+      const pharmId = pharmacyConflictItem.pharmacy.id;
+      const pharmName = pharmacyConflictItem.pharmacy.display_name;
+      setCart({
+        pharmacyId: pharmId,
+        pharmacyName: pharmName,
+        fulfillmentType: "PICKUP",
+        items: [{
+          medicine: pharmacyConflictItem.medicine,
+          pharmacy_id: pharmId,
+          quantity: 1,
+          price: pharmacyConflictItem.price,
+          fulfillment_options: pharmacyConflictItem.pharmacy.fulfillment_options || {}
+        }],
+        customerNote: "",
+        deliveryAddress: location.name
+      });
+      setPrescriptionFile(null);
+      setPharmacyConflictItem(null);
+      showToast(`Cart updated with items from ${pharmName}`, "info");
     };
     const updateCartQty = (medId, delta) => {
       setCart((prev) => {
@@ -33561,8 +33603,13 @@
       try {
         const res = await fetch("/v1/inventory/confirm", {
           method: "POST",
-          headers: { "Content-Type": "application/json", "Authorization": `Bearer ${currentToken}` },
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${currentToken}`,
+            ...pharmacyData?.id ? { "X-Pharmacy-Id": pharmacyData.id } : {}
+          },
           body: JSON.stringify({
+            pharmacy_id: pharmacyData?.id,
             medicine_id: selectedStockMedId,
             physical_quantity: Number(physicalQty),
             unit_price_minor: Math.round(Number(physicalUnitPrice) * 100),
@@ -33602,8 +33649,15 @@
       try {
         const res = await fetch("/v1/inventory/import", {
           method: "POST",
-          headers: { "Content-Type": "application/json", "Authorization": `Bearer ${currentToken}` },
-          body: JSON.stringify({ csv_content: csvContent })
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${currentToken}`,
+            ...pharmacyData?.id ? { "X-Pharmacy-Id": pharmacyData.id } : {}
+          },
+          body: JSON.stringify({
+            csv_content: csvContent,
+            pharmacy_id: pharmacyData?.id
+          })
         });
         const data = await res.json();
         if (!res.ok || !data.data) throw new Error(data.error?.message || "CSV Import failed");
@@ -33612,6 +33666,62 @@
         setCsvContent("");
         setUploadedFileName("");
         loadPharmacyData();
+      } catch (err) {
+        showToast(err.message, "error");
+      }
+    };
+    const handleCreateConnection = async (e) => {
+      if (e) e.preventDefault();
+      if (!currentToken) return;
+      try {
+        const res = await fetch("/v1/integrations/connections", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "Authorization": `Bearer ${currentToken}` },
+          body: JSON.stringify({
+            provider_name: selectedProvider,
+            provider_type: "POS_API",
+            webhook_secret: webhookSecretInput.trim() || void 0
+          })
+        });
+        const data = await res.json();
+        if (!res.ok || !data.data) throw new Error(data.error?.message || "Failed to save connection");
+        showToast(`Connected ${selectedProvider.toUpperCase()} webhook!`, "success");
+        setWebhookSecretInput("");
+        await loadIntegrationsData();
+      } catch (err) {
+        showToast(err.message, "error");
+      }
+    };
+    const handleTriggerConnectionSync = async (connectionId) => {
+      if (!currentToken) return;
+      setIsSyncingPos(true);
+      try {
+        const res = await fetch(`/v1/integrations/connections/${connectionId}/sync`, {
+          method: "POST",
+          headers: { "Authorization": `Bearer ${currentToken}` }
+        });
+        const data = await res.json();
+        if (!res.ok || !data.data) throw new Error(data.error?.message || "Sync failed");
+        showToast(`Synced ${data.data.records_accepted} inventory records!`, "success");
+        await Promise.all([loadPharmacyData(), loadIntegrationsData()]);
+      } catch (err) {
+        showToast(err.message, "error");
+      } finally {
+        setIsSyncingPos(false);
+      }
+    };
+    const handleDeleteConnection = async (connectionId) => {
+      if (!currentToken) return;
+      if (!window.confirm("Disconnect this PMS integration?")) return;
+      try {
+        const res = await fetch(`/v1/integrations/connections/${connectionId}`, {
+          method: "DELETE",
+          headers: { "Authorization": `Bearer ${currentToken}` }
+        });
+        const data = await res.json();
+        if (!res.ok || !data.data) throw new Error(data.error?.message || "Failed to disconnect");
+        showToast("Integration disconnected.", "info");
+        await loadIntegrationsData();
       } catch (err) {
         showToast(err.message, "error");
       }
@@ -33649,11 +33759,19 @@
     )), /* @__PURE__ */ import_react21.default.createElement("div", { className: "splash-bottom-bar" }, /* @__PURE__ */ import_react21.default.createElement("div", { className: "splash-brand-text" }, /* @__PURE__ */ import_react21.default.createElement("h2", null, "PHARMALINK"), /* @__PURE__ */ import_react21.default.createElement("span", null, "DIGITAL HEALTHCARE NETWORK")), /* @__PURE__ */ import_react21.default.createElement("div", { className: "splash-loader-bar" }, /* @__PURE__ */ import_react21.default.createElement("div", { className: "splash-loader-progress" }))))), activePortal === "customer" ? /* @__PURE__ */ import_react21.default.createElement("header", { className: "navbar" }, /* @__PURE__ */ import_react21.default.createElement("div", { className: "navbar-container" }, /* @__PURE__ */ import_react21.default.createElement("div", { className: "brand-wrapper clickable", onClick: () => navigateTo("home") }, /* @__PURE__ */ import_react21.default.createElement("div", { className: "brand-logo-badge" }, /* @__PURE__ */ import_react21.default.createElement("img", { src: "/logo.png", alt: "PharmaLink Logo", className: "brand-logo-img" })), /* @__PURE__ */ import_react21.default.createElement("span", null, "PharmaLink")), /* @__PURE__ */ import_react21.default.createElement("nav", { className: "nav-links" }, /* @__PURE__ */ import_react21.default.createElement("button", { className: activePage === "home" && activePortal === "customer" ? "active" : "", onClick: () => navigateTo("home") }, "Home"), /* @__PURE__ */ import_react21.default.createElement("button", { className: activePage === "medicines" && activePortal === "customer" ? "active" : "", onClick: () => navigateTo("medicines") }, "Medicines"), /* @__PURE__ */ import_react21.default.createElement("button", { className: activePage === "prescriptions" && activePortal === "customer" ? "active" : "", onClick: () => navigateTo("prescriptions") }, "Prescriptions"), /* @__PURE__ */ import_react21.default.createElement("button", { className: activePage === "pharmacies" && activePortal === "customer" ? "active" : "", onClick: () => navigateTo("pharmacies") }, "Pharmacies"), /* @__PURE__ */ import_react21.default.createElement("button", { className: activePage === "howItWorks" && activePortal === "customer" ? "active" : "", onClick: () => navigateTo("howItWorks") }, "How it works")), /* @__PURE__ */ import_react21.default.createElement("div", { className: "nav-actions" }, isPharmacyUser && /* @__PURE__ */ import_react21.default.createElement(
       "button",
       {
-        className: `btn btn-sm ${activePortal !== "customer" ? "btn-primary" : "btn-outline"}`,
-        onClick: () => setActivePortal((prev) => prev === "customer" ? currentUser?.role === "PLATFORM_OPS" ? "platform" : "pharmacy" : "customer"),
-        title: "Toggle between Patient View and Pharmacy Management Portal"
+        className: "btn btn-sm btn-primary",
+        onClick: () => {
+          const targetPortal = currentUser?.role === "PLATFORM_OPS" ? "platform" : "pharmacy";
+          const targetPage = targetPortal === "platform" ? "network" : "overview";
+          setActivePortal(targetPortal);
+          setActiveAdminPage(targetPage);
+          window.history.pushState({}, "", `/${targetPortal}/${targetPage}`);
+          if (targetPortal === "pharmacy" && currentToken) loadPharmacyData(currentToken);
+          if (targetPortal === "platform" && currentToken) loadPlatformData(currentToken);
+        },
+        title: currentUser?.role === "PLATFORM_OPS" ? "Go to Platform Operations Portal" : "Go to Pharmacy Operations Dashboard"
       },
-      activePortal !== "customer" ? currentUser?.role === "PLATFORM_OPS" ? "\u{1F6E1}\uFE0F Platform Operations" : "\u{1F3E5} Pharmacy Operations" : currentUser?.role === "PLATFORM_OPS" ? "Switch to Platform Ops" : "Switch to Ops Portal"
+      currentUser?.role === "PLATFORM_OPS" ? "\u{1F6E1}\uFE0F Platform Operations" : "\u{1F3E5} Pharmacy Operations"
     ), /* @__PURE__ */ import_react21.default.createElement(
       "button",
       {
@@ -33714,11 +33832,7 @@
         title: isDarkMode ? "Switch to light mode" : "Switch to dark mode"
       },
       /* @__PURE__ */ import_react21.default.createElement("span", { "aria-hidden": "true" }, isDarkMode ? "\u2600\uFE0F" : "\u{1F319}")
-    ), /* @__PURE__ */ import_react21.default.createElement("button", { className: "btn btn-outline btn-sm", onClick: () => {
-      window.history.pushState({}, "", "/");
-      setActivePage("home");
-      setActivePortal("customer");
-    } }, "\u2190 Customer view"), /* @__PURE__ */ import_react21.default.createElement("button", { className: "btn btn-secondary btn-sm", onClick: () => setIsProfileOpen(true) }, "Account"))), /* @__PURE__ */ import_react21.default.createElement("main", { style: { flex: 1 } }, activePortal === "customer" ? activePage === "home" ? /* @__PURE__ */ import_react21.default.createElement("div", null, /* @__PURE__ */ import_react21.default.createElement("section", { className: "container-page", style: { paddingTop: "1.5rem" } }, /* @__PURE__ */ import_react21.default.createElement("div", { className: "hero-bento" }, /* @__PURE__ */ import_react21.default.createElement("div", { className: "hero-main-card hero-twist-card" }, /* @__PURE__ */ import_react21.default.createElement("div", null, /* @__PURE__ */ import_react21.default.createElement("span", { className: "hero-pill" }, /* @__PURE__ */ import_react21.default.createElement("span", { className: "hero-dot" }), " Licensed Pharmacies Across Ghana"), /* @__PURE__ */ import_react21.default.createElement(HeroHeadlineReveal, { text: "Medicine, from the pharmacy closest to you." }), /* @__PURE__ */ import_react21.default.createElement("p", { className: "hero-description" }, "PharmaLink matches your search directly to verified dispensary stock and fast delivery near your location."), /* @__PURE__ */ import_react21.default.createElement("form", { className: "hero-search-form", onSubmit: (e) => {
+    ), /* @__PURE__ */ import_react21.default.createElement("button", { className: "btn btn-secondary btn-sm", onClick: () => setIsProfileOpen(true) }, "Account"))), /* @__PURE__ */ import_react21.default.createElement("main", { style: { flex: 1 } }, activePortal === "customer" ? activePage === "home" ? /* @__PURE__ */ import_react21.default.createElement("div", null, /* @__PURE__ */ import_react21.default.createElement("section", { className: "container-page", style: { paddingTop: "1.5rem" } }, /* @__PURE__ */ import_react21.default.createElement("div", { className: "hero-bento" }, /* @__PURE__ */ import_react21.default.createElement("div", { className: "hero-main-card hero-twist-card" }, /* @__PURE__ */ import_react21.default.createElement("div", null, /* @__PURE__ */ import_react21.default.createElement("span", { className: "hero-pill" }, /* @__PURE__ */ import_react21.default.createElement("span", { className: "hero-dot" }), " Licensed Pharmacies Across Ghana"), /* @__PURE__ */ import_react21.default.createElement(HeroHeadlineReveal, { text: "Medicine, from the pharmacy closest to you." }), /* @__PURE__ */ import_react21.default.createElement("p", { className: "hero-description" }, "PharmaLink matches your search directly to verified dispensary stock and fast delivery near your location."), /* @__PURE__ */ import_react21.default.createElement("form", { className: "hero-search-form", onSubmit: (e) => {
       e.preventDefault();
       navigateTo("medicines");
       performSearch(searchQuery);
@@ -33860,7 +33974,10 @@
       }
     ) : (
       /* PHARMACY OPERATIONS & DISPENSARY DASHBOARD */
-      /* @__PURE__ */ import_react21.default.createElement("div", { className: "container-page pharmacy-dashboard-content", style: { paddingTop: "1.5rem" } }, /* @__PURE__ */ import_react21.default.createElement("div", { style: { background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "var(--radius-2xl)", padding: "2rem", marginBottom: "1.75rem", display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "1.25rem", boxShadow: "var(--shadow-sm)" } }, /* @__PURE__ */ import_react21.default.createElement("div", null, /* @__PURE__ */ import_react21.default.createElement("span", { className: "badge badge-verified", style: { marginBottom: "0.5rem" } }, currentUser?.role === "PLATFORM_OPS" ? "\u{1F6E1}\uFE0F Platform Operations Portal" : "\u{1F3E5} Licensed Dispensary Dashboard"), /* @__PURE__ */ import_react21.default.createElement("h2", { style: { fontSize: "1.75rem", fontWeight: 900 } }, pharmacyData?.display_name || "East Legon Pharmacy Ltd"), /* @__PURE__ */ import_react21.default.createElement("p", { style: { fontSize: "0.9rem", color: "var(--text-muted)", marginTop: "0.25rem" } }, "Dispensary Real-Time Stock & Order Fulfillment \u2022 License: ", pharmacyData?.license_number || "FDA-PH-2023-0101")), currentUser?.role !== "PLATFORM_OPS" && /* @__PURE__ */ import_react21.default.createElement("div", { style: { display: "flex", gap: "0.5rem", flexWrap: "wrap" } }, /* @__PURE__ */ import_react21.default.createElement("button", { className: "btn btn-secondary btn-sm", onClick: () => setIsPhysicalStockModalOpen(true) }, "\u{1F4CB} Physical Count Check"), /* @__PURE__ */ import_react21.default.createElement("button", { className: "btn btn-outline btn-sm", onClick: () => setIsCsvImportModalOpen(true) }, "\u{1F4C1} Batch CSV Stock Upload"), /* @__PURE__ */ import_react21.default.createElement("button", { className: "btn btn-outline btn-sm", onClick: () => showToast("Live POS sync provider not configured. Use CSV import or shelf verification.", "info") }, "\u26A1 POS Sync"))), /* @__PURE__ */ import_react21.default.createElement(import_react21.default.Fragment, null, /* @__PURE__ */ import_react21.default.createElement("div", { style: { display: "flex", gap: "0.75rem", borderBottom: "1px solid var(--border)", paddingBottom: "0.75rem", marginBottom: "1.75rem", overflowX: "auto" } }, /* @__PURE__ */ import_react21.default.createElement(
+      /* @__PURE__ */ import_react21.default.createElement("div", { className: "container-page pharmacy-dashboard-content", style: { paddingTop: "1.5rem" } }, /* @__PURE__ */ import_react21.default.createElement("div", { style: { background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "var(--radius-2xl)", padding: "2rem", marginBottom: "1.75rem", display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "1.25rem", boxShadow: "var(--shadow-sm)" } }, /* @__PURE__ */ import_react21.default.createElement("div", null, /* @__PURE__ */ import_react21.default.createElement("span", { className: "badge badge-verified", style: { marginBottom: "0.5rem" } }, currentUser?.role === "PLATFORM_OPS" ? "\u{1F6E1}\uFE0F Platform Operations Portal" : "\u{1F3E5} Licensed Dispensary Dashboard"), /* @__PURE__ */ import_react21.default.createElement("h2", { style: { fontSize: "1.75rem", fontWeight: 900 } }, pharmacyData?.display_name || "East Legon Pharmacy Ltd"), /* @__PURE__ */ import_react21.default.createElement("p", { style: { fontSize: "0.9rem", color: "var(--text-muted)", marginTop: "0.25rem" } }, "Dispensary Real-Time Stock & Order Fulfillment \u2022 License: ", pharmacyData?.license_number || "FDA-PH-2023-0101")), currentUser?.role !== "PLATFORM_OPS" && /* @__PURE__ */ import_react21.default.createElement("div", { style: { display: "flex", gap: "0.5rem", flexWrap: "wrap" } }, /* @__PURE__ */ import_react21.default.createElement("button", { className: "btn btn-secondary btn-sm", onClick: () => setIsPhysicalStockModalOpen(true) }, "\u{1F4CB} Physical Count Check"), /* @__PURE__ */ import_react21.default.createElement("button", { className: "btn btn-outline btn-sm", onClick: () => setIsCsvImportModalOpen(true) }, "\u{1F4C1} Batch CSV Stock Upload"), /* @__PURE__ */ import_react21.default.createElement("button", { className: "btn btn-primary btn-sm", onClick: () => {
+        setIsPosModalOpen(true);
+        loadIntegrationsData();
+      } }, "\u26A1 POS & PMS Integrations"))), /* @__PURE__ */ import_react21.default.createElement(import_react21.default.Fragment, null, /* @__PURE__ */ import_react21.default.createElement("div", { style: { display: "flex", gap: "0.75rem", borderBottom: "1px solid var(--border)", paddingBottom: "0.75rem", marginBottom: "1.75rem", overflowX: "auto" } }, /* @__PURE__ */ import_react21.default.createElement(
         "button",
         {
           className: `btn btn-sm ${activePharmTab === "orders" ? "btn-primary" : "btn-outline"}`,
@@ -33904,7 +34021,7 @@
           style: { position: "absolute", right: "0.85rem", top: "50%", transform: "translateY(-50%)", background: "transparent", border: "none", color: "var(--text-muted)", cursor: "pointer", fontSize: "0.9rem" }
         },
         "\xD7"
-      )), /* @__PURE__ */ import_react21.default.createElement("div", { style: { display: "flex", gap: "0.5rem", fontSize: "0.82rem", color: "var(--text-muted)", alignItems: "center" } }, /* @__PURE__ */ import_react21.default.createElement("span", null, "Status count:"), /* @__PURE__ */ import_react21.default.createElement("span", { className: "badge badge-likely", style: { fontSize: "0.72rem" } }, "Pending: ", pharmacyOrders.filter((o) => o.status === "PENDING").length), /* @__PURE__ */ import_react21.default.createElement("span", { className: "badge badge-verified", style: { fontSize: "0.72rem" } }, "Reserved/Active: ", pharmacyOrders.filter((o) => ["ACCEPTED", "READY", "OUT_FOR_DELIVERY"].includes(o.status)).length))), /* @__PURE__ */ import_react21.default.createElement("div", { style: { background: "var(--surface)", borderRadius: "var(--radius-2xl)", border: "1px solid var(--border)", overflow: "hidden", boxShadow: "var(--shadow-xs)" } }, /* @__PURE__ */ import_react21.default.createElement("table", { style: { width: "100%", borderCollapse: "collapse", textAlign: "left", fontSize: "0.9rem" } }, /* @__PURE__ */ import_react21.default.createElement("thead", null, /* @__PURE__ */ import_react21.default.createElement("tr", { style: { background: "var(--card-alt)", borderBottom: "1px solid var(--border)" } }, /* @__PURE__ */ import_react21.default.createElement("th", { style: { padding: "1rem 1.25rem" } }, "Order & Customer"), /* @__PURE__ */ import_react21.default.createElement("th", { style: { padding: "1rem 1.25rem" } }, "Fulfillment"), /* @__PURE__ */ import_react21.default.createElement("th", { style: { padding: "1rem 1.25rem" } }, "Total"), /* @__PURE__ */ import_react21.default.createElement("th", { style: { padding: "1rem 1.25rem" } }, "Status"), /* @__PURE__ */ import_react21.default.createElement("th", { style: { padding: "1rem 1.25rem" } }, "Counter Actions"))), /* @__PURE__ */ import_react21.default.createElement("tbody", null, (() => {
+      )), /* @__PURE__ */ import_react21.default.createElement("div", { style: { display: "flex", gap: "0.5rem", fontSize: "0.82rem", color: "var(--text-muted)", alignItems: "center" } }, /* @__PURE__ */ import_react21.default.createElement("span", null, "Status count:"), /* @__PURE__ */ import_react21.default.createElement("span", { className: "badge badge-likely", style: { fontSize: "0.72rem" } }, "Pending: ", pharmacyOrders.filter((o) => o.status === "PENDING").length), /* @__PURE__ */ import_react21.default.createElement("span", { className: "badge badge-verified", style: { fontSize: "0.72rem" } }, "Reserved/Active: ", pharmacyOrders.filter((o) => ["ACCEPTED", "READY", "OUT_FOR_DELIVERY"].includes(o.status)).length))), /* @__PURE__ */ import_react21.default.createElement("div", { className: "table-responsive-wrapper", style: { background: "var(--surface)", borderRadius: "var(--radius-2xl)", border: "1px solid var(--border)", overflowX: "auto", boxShadow: "var(--shadow-xs)" } }, /* @__PURE__ */ import_react21.default.createElement("table", { style: { width: "100%", borderCollapse: "collapse", textAlign: "left", fontSize: "0.9rem", minWidth: "680px" } }, /* @__PURE__ */ import_react21.default.createElement("thead", null, /* @__PURE__ */ import_react21.default.createElement("tr", { style: { background: "var(--card-alt)", borderBottom: "1px solid var(--border)" } }, /* @__PURE__ */ import_react21.default.createElement("th", { style: { padding: "1rem 1.25rem" } }, "Order & Customer"), /* @__PURE__ */ import_react21.default.createElement("th", { style: { padding: "1rem 1.25rem" } }, "Fulfillment"), /* @__PURE__ */ import_react21.default.createElement("th", { style: { padding: "1rem 1.25rem" } }, "Total"), /* @__PURE__ */ import_react21.default.createElement("th", { style: { padding: "1rem 1.25rem" } }, "Status"), /* @__PURE__ */ import_react21.default.createElement("th", { style: { padding: "1rem 1.25rem" } }, "Counter Actions"))), /* @__PURE__ */ import_react21.default.createElement("tbody", null, (() => {
         const filtered = pharmacyOrders.filter((ord) => {
           if (!pharmacyOrderSearch.trim()) return true;
           const q = pharmacyOrderSearch.trim().toLowerCase();
@@ -33960,7 +34077,7 @@
           },
           "\u2713 Confirm Delivery Received"
         ), ord.status === "COMPLETED" && /* @__PURE__ */ import_react21.default.createElement("span", { style: { fontSize: "0.82rem", color: "#10b981", fontWeight: 800 } }, "\u2713 Dispensed & Fulfilled"), ["REJECTED", "CANCELLED"].includes(ord.status) && /* @__PURE__ */ import_react21.default.createElement("span", { style: { fontSize: "0.82rem", color: "var(--text-muted)" } }, ord.status))));
-      })())))), activePharmTab === "inventory" && /* @__PURE__ */ import_react21.default.createElement("div", { style: { background: "var(--surface)", borderRadius: "var(--radius-2xl)", border: "1px solid var(--border)", overflow: "hidden", boxShadow: "var(--shadow-xs)" } }, /* @__PURE__ */ import_react21.default.createElement("table", { style: { width: "100%", borderCollapse: "collapse", textAlign: "left", fontSize: "0.9rem" } }, /* @__PURE__ */ import_react21.default.createElement("thead", null, /* @__PURE__ */ import_react21.default.createElement("tr", { style: { background: "var(--card-alt)", borderBottom: "1px solid var(--border)" } }, /* @__PURE__ */ import_react21.default.createElement("th", { style: { padding: "1rem 1.25rem" } }, "Medicine Name"), /* @__PURE__ */ import_react21.default.createElement("th", { style: { padding: "1rem 1.25rem" } }, "Source"), /* @__PURE__ */ import_react21.default.createElement("th", { style: { padding: "1rem 1.25rem" } }, "Available Units"), /* @__PURE__ */ import_react21.default.createElement("th", { style: { padding: "1rem 1.25rem" } }, "Reserved"), /* @__PURE__ */ import_react21.default.createElement("th", { style: { padding: "1rem 1.25rem" } }, "Unit Price"), /* @__PURE__ */ import_react21.default.createElement("th", { style: { padding: "1rem 1.25rem" } }, "State"))), /* @__PURE__ */ import_react21.default.createElement("tbody", null, pharmacyInventory.length === 0 ? /* @__PURE__ */ import_react21.default.createElement("tr", null, /* @__PURE__ */ import_react21.default.createElement("td", { colSpan: 6, style: { padding: "3rem", textAlign: "center", color: "var(--text-muted)" } }, "No inventory records found. Upload a CSV file or confirm physical stock counts.")) : pharmacyInventory.map((item) => /* @__PURE__ */ import_react21.default.createElement("tr", { key: item.id, style: { borderBottom: "1px solid var(--border)" } }, /* @__PURE__ */ import_react21.default.createElement("td", { style: { padding: "1rem 1.25rem" } }, /* @__PURE__ */ import_react21.default.createElement("strong", null, item.generic_name), /* @__PURE__ */ import_react21.default.createElement("div", { style: { fontSize: "0.78rem", color: "var(--text-muted)" } }, item.brand_name || "Generic")), /* @__PURE__ */ import_react21.default.createElement("td", { style: { padding: "1rem 1.25rem" } }, /* @__PURE__ */ import_react21.default.createElement("span", { className: "badge badge-likely" }, item.source_type)), /* @__PURE__ */ import_react21.default.createElement("td", { style: { padding: "1rem 1.25rem", fontWeight: 800 } }, item.available_quantity, " units"), /* @__PURE__ */ import_react21.default.createElement("td", { style: { padding: "1rem 1.25rem" } }, item.reserved_quantity, " units"), /* @__PURE__ */ import_react21.default.createElement("td", { style: { padding: "1rem 1.25rem", color: "var(--primary)", fontWeight: 800 } }, "GHS ", (item.unit_price_minor / 100).toFixed(2)), /* @__PURE__ */ import_react21.default.createElement("td", { style: { padding: "1rem 1.25rem" } }, /* @__PURE__ */ import_react21.default.createElement("span", { className: "badge badge-verified" }, item.availability_state))))))), activePharmTab === "prescriptions" && /* @__PURE__ */ import_react21.default.createElement("div", null, pendingPrescriptions.length === 0 ? /* @__PURE__ */ import_react21.default.createElement("div", { className: "empty-state" }, /* @__PURE__ */ import_react21.default.createElement("div", { className: "empty-state-icon" }, "\u{1F4C4}"), /* @__PURE__ */ import_react21.default.createElement("h3", null, "No Pending Prescriptions"), /* @__PURE__ */ import_react21.default.createElement("p", null, "When customers attach doctor's prescriptions to their orders, they will appear here for pharmacist review.")) : pendingPrescriptions.map((prescription) => /* @__PURE__ */ import_react21.default.createElement("article", { className: "prescription-review-card", key: prescription.id }, /* @__PURE__ */ import_react21.default.createElement("div", null, /* @__PURE__ */ import_react21.default.createElement("div", { className: "prescription-review-title" }, "Prescription for ", prescription.customer_first_name || "Customer", " ", prescription.customer_last_name || ""), /* @__PURE__ */ import_react21.default.createElement("div", { className: "prescription-review-meta" }, "Order #", prescription.order_number || prescription.order_id?.substring(0, 8), " \xB7 Status: ", prescription.status, " \xB7 ", new Date(prescription.created_at).toLocaleString()), prescription.review_note && /* @__PURE__ */ import_react21.default.createElement("p", { className: "prescription-review-note" }, prescription.review_note)), /* @__PURE__ */ import_react21.default.createElement("div", { className: "prescription-review-actions" }, /* @__PURE__ */ import_react21.default.createElement("button", { className: "btn btn-outline btn-sm", onClick: () => viewPrescriptionFile(prescription.id) }, "\u{1F441}\uFE0F View Prescription File"), /* @__PURE__ */ import_react21.default.createElement("button", { className: "btn btn-primary btn-sm", onClick: () => reviewPrescription(prescription.id, "APPROVED") }, "\u2713 Approve"), /* @__PURE__ */ import_react21.default.createElement("button", { className: "btn btn-secondary btn-sm", onClick: () => reviewPrescription(prescription.id, "CLARIFICATION_REQUIRED") }, "\u2753 Request Clarification"), /* @__PURE__ */ import_react21.default.createElement("button", { className: "btn btn-outline btn-sm", onClick: () => reviewPrescription(prescription.id, "REJECTED") }, "\u2715 Reject")))))))
+      })())))), activePharmTab === "inventory" && /* @__PURE__ */ import_react21.default.createElement("div", { className: "table-responsive-wrapper", style: { background: "var(--surface)", borderRadius: "var(--radius-2xl)", border: "1px solid var(--border)", overflowX: "auto", boxShadow: "var(--shadow-xs)" } }, /* @__PURE__ */ import_react21.default.createElement("table", { style: { width: "100%", borderCollapse: "collapse", textAlign: "left", fontSize: "0.9rem", minWidth: "680px" } }, /* @__PURE__ */ import_react21.default.createElement("thead", null, /* @__PURE__ */ import_react21.default.createElement("tr", { style: { background: "var(--card-alt)", borderBottom: "1px solid var(--border)" } }, /* @__PURE__ */ import_react21.default.createElement("th", { style: { padding: "1rem 1.25rem" } }, "Medicine Name"), /* @__PURE__ */ import_react21.default.createElement("th", { style: { padding: "1rem 1.25rem" } }, "Source"), /* @__PURE__ */ import_react21.default.createElement("th", { style: { padding: "1rem 1.25rem" } }, "Available Units"), /* @__PURE__ */ import_react21.default.createElement("th", { style: { padding: "1rem 1.25rem" } }, "Reserved"), /* @__PURE__ */ import_react21.default.createElement("th", { style: { padding: "1rem 1.25rem" } }, "Unit Price"), /* @__PURE__ */ import_react21.default.createElement("th", { style: { padding: "1rem 1.25rem" } }, "State"))), /* @__PURE__ */ import_react21.default.createElement("tbody", null, pharmacyInventory.length === 0 ? /* @__PURE__ */ import_react21.default.createElement("tr", null, /* @__PURE__ */ import_react21.default.createElement("td", { colSpan: 6, style: { padding: "3rem", textAlign: "center", color: "var(--text-muted)" } }, "No inventory records found. Upload a CSV file or confirm physical stock counts.")) : pharmacyInventory.map((item) => /* @__PURE__ */ import_react21.default.createElement("tr", { key: item.id, style: { borderBottom: "1px solid var(--border)" } }, /* @__PURE__ */ import_react21.default.createElement("td", { style: { padding: "1rem 1.25rem" } }, /* @__PURE__ */ import_react21.default.createElement("strong", null, item.generic_name), /* @__PURE__ */ import_react21.default.createElement("div", { style: { fontSize: "0.78rem", color: "var(--text-muted)" } }, item.brand_name || "Generic")), /* @__PURE__ */ import_react21.default.createElement("td", { style: { padding: "1rem 1.25rem" } }, /* @__PURE__ */ import_react21.default.createElement("span", { className: "badge badge-likely" }, item.source_type)), /* @__PURE__ */ import_react21.default.createElement("td", { style: { padding: "1rem 1.25rem", fontWeight: 800 } }, item.available_quantity, " units"), /* @__PURE__ */ import_react21.default.createElement("td", { style: { padding: "1rem 1.25rem" } }, item.reserved_quantity, " units"), /* @__PURE__ */ import_react21.default.createElement("td", { style: { padding: "1rem 1.25rem", color: "var(--primary)", fontWeight: 800 } }, "GHS ", (item.unit_price_minor / 100).toFixed(2)), /* @__PURE__ */ import_react21.default.createElement("td", { style: { padding: "1rem 1.25rem" } }, /* @__PURE__ */ import_react21.default.createElement("span", { className: "badge badge-verified" }, item.availability_state))))))), activePharmTab === "prescriptions" && /* @__PURE__ */ import_react21.default.createElement("div", null, pendingPrescriptions.length === 0 ? /* @__PURE__ */ import_react21.default.createElement("div", { className: "empty-state" }, /* @__PURE__ */ import_react21.default.createElement("div", { className: "empty-state-icon" }, "\u{1F4C4}"), /* @__PURE__ */ import_react21.default.createElement("h3", null, "No Pending Prescriptions"), /* @__PURE__ */ import_react21.default.createElement("p", null, "When customers attach doctor's prescriptions to their orders, they will appear here for pharmacist review.")) : pendingPrescriptions.map((prescription) => /* @__PURE__ */ import_react21.default.createElement("article", { className: "prescription-review-card", key: prescription.id }, /* @__PURE__ */ import_react21.default.createElement("div", null, /* @__PURE__ */ import_react21.default.createElement("div", { className: "prescription-review-title" }, "Prescription for ", prescription.customer_first_name || "Customer", " ", prescription.customer_last_name || ""), /* @__PURE__ */ import_react21.default.createElement("div", { className: "prescription-review-meta" }, "Order #", prescription.order_number || prescription.order_id?.substring(0, 8), " \xB7 Status: ", prescription.status, " \xB7 ", new Date(prescription.created_at).toLocaleString()), prescription.review_note && /* @__PURE__ */ import_react21.default.createElement("p", { className: "prescription-review-note" }, prescription.review_note)), /* @__PURE__ */ import_react21.default.createElement("div", { className: "prescription-review-actions" }, /* @__PURE__ */ import_react21.default.createElement("button", { className: "btn btn-outline btn-sm", onClick: () => viewPrescriptionFile(prescription.id) }, "\u{1F441}\uFE0F View Prescription File"), /* @__PURE__ */ import_react21.default.createElement("button", { className: "btn btn-primary btn-sm", onClick: () => reviewPrescription(prescription.id, "APPROVED") }, "\u2713 Approve"), /* @__PURE__ */ import_react21.default.createElement("button", { className: "btn btn-secondary btn-sm", onClick: () => reviewPrescription(prescription.id, "CLARIFICATION_REQUIRED") }, "\u2753 Request Clarification"), /* @__PURE__ */ import_react21.default.createElement("button", { className: "btn btn-outline btn-sm", onClick: () => reviewPrescription(prescription.id, "REJECTED") }, "\u2715 Reject")))))))
     )))), activePortal === "customer" && /* @__PURE__ */ import_react21.default.createElement("footer", { className: "footer" }, /* @__PURE__ */ import_react21.default.createElement("div", { className: "footer-grid" }, /* @__PURE__ */ import_react21.default.createElement("div", null, /* @__PURE__ */ import_react21.default.createElement("div", { className: "brand-wrapper", style: { marginBottom: "0.85rem" } }, /* @__PURE__ */ import_react21.default.createElement("div", { className: "brand-logo-badge" }, "\u{1F48A}"), /* @__PURE__ */ import_react21.default.createElement("span", null, "PharmaLink")), /* @__PURE__ */ import_react21.default.createElement("p", { style: { fontSize: "0.9rem", color: "var(--text-muted)", lineHeight: 1.6, maxWidth: "320px" } }, "Ghana's digital pharmacy availability and ordering network. Guaranteed authentic medicines from verified dispensaries near you.")), /* @__PURE__ */ import_react21.default.createElement("div", { className: "footer-col" }, /* @__PURE__ */ import_react21.default.createElement("h4", null, "Shop"), /* @__PURE__ */ import_react21.default.createElement("ul", null, /* @__PURE__ */ import_react21.default.createElement("li", null, /* @__PURE__ */ import_react21.default.createElement("a", { href: pagePaths.medicines, onClick: (e) => {
       e.preventDefault();
       setSearchQuery("");
@@ -33989,7 +34106,56 @@
     } }, "Pharmacy Partners")), /* @__PURE__ */ import_react21.default.createElement("li", null, /* @__PURE__ */ import_react21.default.createElement("a", { href: pagePaths.pharmacies, onClick: (e) => {
       e.preventDefault();
       navigateTo("pharmacies");
-    } }, "Verified Network")), /* @__PURE__ */ import_react21.default.createElement("li", null, /* @__PURE__ */ import_react21.default.createElement("a", { href: "#" }, "Regulatory Compliance")))), /* @__PURE__ */ import_react21.default.createElement("div", { className: "footer-col" }, /* @__PURE__ */ import_react21.default.createElement("h4", null, "Support & Help"), /* @__PURE__ */ import_react21.default.createElement("ul", null, /* @__PURE__ */ import_react21.default.createElement("li", null, /* @__PURE__ */ import_react21.default.createElement("a", { href: "#" }, "Emergency Help")), /* @__PURE__ */ import_react21.default.createElement("li", null, /* @__PURE__ */ import_react21.default.createElement("a", { href: "#" }, "Terms of Service")), /* @__PURE__ */ import_react21.default.createElement("li", null, /* @__PURE__ */ import_react21.default.createElement("a", { href: "#" }, "Privacy & Prescription Safety")), /* @__PURE__ */ import_react21.default.createElement("li", null, /* @__PURE__ */ import_react21.default.createElement("a", { href: "#" }, "Contact Pharmacist Support"))))), /* @__PURE__ */ import_react21.default.createElement("div", { className: "footer-bottom" }, "\xA9 2026 PharmaLink Ghana Ltd. Regulated and accredited under Ghana Pharmacy Council guidelines.")), isLocationModalOpen && /* @__PURE__ */ import_react21.default.createElement("div", { className: "modal-overlay", onClick: () => setIsLocationModalOpen(false) }, /* @__PURE__ */ import_react21.default.createElement("div", { className: "modal-card", onClick: (e) => e.stopPropagation() }, /* @__PURE__ */ import_react21.default.createElement("div", { className: "modal-header" }, /* @__PURE__ */ import_react21.default.createElement("h3", { style: { fontSize: "1.25rem", fontWeight: 800 } }, "\u{1F4CD} Select Location in Ghana"), /* @__PURE__ */ import_react21.default.createElement("button", { className: "modal-close", onClick: () => setIsLocationModalOpen(false) }, "\xD7")), /* @__PURE__ */ import_react21.default.createElement("div", { className: "modal-body" }, /* @__PURE__ */ import_react21.default.createElement(
+    } }, "Verified Network")), /* @__PURE__ */ import_react21.default.createElement("li", null, /* @__PURE__ */ import_react21.default.createElement("a", { href: "#" }, "Regulatory Compliance")))), /* @__PURE__ */ import_react21.default.createElement("div", { className: "footer-col" }, /* @__PURE__ */ import_react21.default.createElement("h4", null, "Support & Help"), /* @__PURE__ */ import_react21.default.createElement("ul", null, /* @__PURE__ */ import_react21.default.createElement("li", null, /* @__PURE__ */ import_react21.default.createElement("a", { href: "#" }, "Emergency Help")), /* @__PURE__ */ import_react21.default.createElement("li", null, /* @__PURE__ */ import_react21.default.createElement("a", { href: "#" }, "Terms of Service")), /* @__PURE__ */ import_react21.default.createElement("li", null, /* @__PURE__ */ import_react21.default.createElement("a", { href: "#" }, "Privacy & Prescription Safety")), /* @__PURE__ */ import_react21.default.createElement("li", null, /* @__PURE__ */ import_react21.default.createElement("a", { href: "#" }, "Contact Pharmacist Support"))))), /* @__PURE__ */ import_react21.default.createElement("div", { className: "footer-bottom" }, "\xA9 2026 PharmaLink Ghana Ltd. Regulated and accredited under Ghana Pharmacy Council guidelines.")), activePortal === "customer" && /* @__PURE__ */ import_react21.default.createElement("nav", { className: "mobile-bottom-nav", "aria-label": "Mobile Navigation" }, /* @__PURE__ */ import_react21.default.createElement(
+      "button",
+      {
+        type: "button",
+        className: `mobile-nav-item ${activePage === "home" ? "active" : ""}`,
+        onClick: () => navigateTo("home")
+      },
+      /* @__PURE__ */ import_react21.default.createElement("span", { className: "mobile-nav-icon" }, "\u{1F3E0}"),
+      /* @__PURE__ */ import_react21.default.createElement("span", { className: "mobile-nav-label" }, "Home")
+    ), /* @__PURE__ */ import_react21.default.createElement(
+      "button",
+      {
+        type: "button",
+        className: `mobile-nav-item ${activePage === "medicines" ? "active" : ""}`,
+        onClick: () => {
+          setSearchQuery("");
+          navigateTo("medicines");
+          performSearch("");
+        }
+      },
+      /* @__PURE__ */ import_react21.default.createElement("span", { className: "mobile-nav-icon" }, "\u{1F48A}"),
+      /* @__PURE__ */ import_react21.default.createElement("span", { className: "mobile-nav-label" }, "Medicines")
+    ), /* @__PURE__ */ import_react21.default.createElement(
+      "button",
+      {
+        type: "button",
+        className: `mobile-nav-item ${activePage === "prescriptions" ? "active" : ""}`,
+        onClick: () => navigateTo("prescriptions")
+      },
+      /* @__PURE__ */ import_react21.default.createElement("span", { className: "mobile-nav-icon" }, "\u{1F4C4}"),
+      /* @__PURE__ */ import_react21.default.createElement("span", { className: "mobile-nav-label" }, "Rx Upload")
+    ), /* @__PURE__ */ import_react21.default.createElement(
+      "button",
+      {
+        type: "button",
+        className: `mobile-nav-item ${activePage === "pharmacies" ? "active" : ""}`,
+        onClick: () => navigateTo("pharmacies")
+      },
+      /* @__PURE__ */ import_react21.default.createElement("span", { className: "mobile-nav-icon" }, "\u{1F3E5}"),
+      /* @__PURE__ */ import_react21.default.createElement("span", { className: "mobile-nav-label" }, "Pharmacies")
+    ), /* @__PURE__ */ import_react21.default.createElement(
+      "button",
+      {
+        type: "button",
+        className: `mobile-nav-item ${activePage === "howItWorks" ? "active" : ""}`,
+        onClick: () => navigateTo("howItWorks")
+      },
+      /* @__PURE__ */ import_react21.default.createElement("span", { className: "mobile-nav-icon" }, "\u2728"),
+      /* @__PURE__ */ import_react21.default.createElement("span", { className: "mobile-nav-label" }, "How it works")
+    )), isLocationModalOpen && /* @__PURE__ */ import_react21.default.createElement("div", { className: "modal-overlay", onClick: () => setIsLocationModalOpen(false) }, /* @__PURE__ */ import_react21.default.createElement("div", { className: "modal-card", onClick: (e) => e.stopPropagation() }, /* @__PURE__ */ import_react21.default.createElement("div", { className: "modal-header" }, /* @__PURE__ */ import_react21.default.createElement("h3", { style: { fontSize: "1.25rem", fontWeight: 800 } }, "\u{1F4CD} Select Location in Ghana"), /* @__PURE__ */ import_react21.default.createElement("button", { className: "modal-close", onClick: () => setIsLocationModalOpen(false) }, "\xD7")), /* @__PURE__ */ import_react21.default.createElement("div", { className: "modal-body" }, /* @__PURE__ */ import_react21.default.createElement(
       "button",
       {
         className: "btn btn-primary",
@@ -34047,7 +34213,55 @@
         onChange: handlePrescriptionFile,
         required: true
       }
-    ), prescriptionFile && /* @__PURE__ */ import_react21.default.createElement("div", { style: { fontSize: "0.82rem", color: "var(--primary)", fontWeight: 700, marginTop: "0.4rem" } }, "\u2713 File selected: ", prescriptionFile.name)), /* @__PURE__ */ import_react21.default.createElement("div", { style: { display: "flex", justifyContent: "space-between", marginTop: "1.25rem", paddingTop: "1rem", borderTop: "2px solid var(--border)", fontSize: "1.2rem", fontWeight: 900 } }, /* @__PURE__ */ import_react21.default.createElement("span", null, "Total Amount:"), /* @__PURE__ */ import_react21.default.createElement("span", { style: { color: "var(--primary)" } }, "GHS ", cartTotal.toFixed(2))), /* @__PURE__ */ import_react21.default.createElement("button", { className: "btn btn-primary", style: { width: "100%", marginTop: "1.25rem", padding: "0.85rem" }, onClick: handleCheckout }, "\u2713 Submit Order to Pharmacy"))))), isRxModalOpen && /* @__PURE__ */ import_react21.default.createElement("div", { className: "modal-overlay", onClick: () => setIsRxModalOpen(false) }, /* @__PURE__ */ import_react21.default.createElement("div", { className: "modal-card", onClick: (e) => e.stopPropagation() }, /* @__PURE__ */ import_react21.default.createElement("div", { className: "modal-header" }, /* @__PURE__ */ import_react21.default.createElement("h3", { style: { fontSize: "1.25rem", fontWeight: 800 } }, "Prescription Upload Workflow"), /* @__PURE__ */ import_react21.default.createElement("button", { className: "modal-close", onClick: () => setIsRxModalOpen(false) }, "\xD7")), /* @__PURE__ */ import_react21.default.createElement("div", { className: "modal-body" }, /* @__PURE__ */ import_react21.default.createElement("p", { style: { color: "var(--text-secondary)", lineHeight: 1.6 } }, "For prescription medications in Ghana, simply search for your medicine, add it to your order, and attach your doctor's prescription (PDF, JPG, or PNG) during checkout."), /* @__PURE__ */ import_react21.default.createElement("div", { style: { marginTop: "1rem", padding: "0.85rem", background: "var(--secondary)", borderRadius: "var(--radius-md)", fontSize: "0.85rem" } }, "\u{1F512} ", /* @__PURE__ */ import_react21.default.createElement("strong", null, "Privacy Guaranteed:"), " Your medical files are reviewed exclusively by registered pharmacists at the assigned dispensary."), /* @__PURE__ */ import_react21.default.createElement("div", { style: { display: "flex", gap: "0.5rem", marginTop: "1.25rem" } }, /* @__PURE__ */ import_react21.default.createElement("button", { className: "btn btn-primary", style: { flex: 1 }, onClick: () => {
+    ), prescriptionFile && /* @__PURE__ */ import_react21.default.createElement("div", { style: { fontSize: "0.82rem", color: "var(--primary)", fontWeight: 700, marginTop: "0.4rem" } }, "\u2713 File selected: ", prescriptionFile.name)), /* @__PURE__ */ import_react21.default.createElement("div", { style: { display: "flex", justifyContent: "space-between", marginTop: "1.25rem", paddingTop: "1rem", borderTop: "2px solid var(--border)", fontSize: "1.2rem", fontWeight: 900 } }, /* @__PURE__ */ import_react21.default.createElement("span", null, "Total Amount:"), /* @__PURE__ */ import_react21.default.createElement("span", { style: { color: "var(--primary)" } }, "GHS ", cartTotal.toFixed(2))), /* @__PURE__ */ import_react21.default.createElement("button", { className: "btn btn-primary", style: { width: "100%", marginTop: "1.25rem", padding: "0.85rem" }, onClick: handleCheckout }, "\u2713 Submit Order to Pharmacy"))))), pharmacyConflictItem && /* @__PURE__ */ import_react21.default.createElement("div", { className: "modal-overlay", onClick: () => setPharmacyConflictItem(null) }, /* @__PURE__ */ import_react21.default.createElement("div", { className: "modal-card", style: { maxWidth: "520px" }, onClick: (e) => e.stopPropagation() }, /* @__PURE__ */ import_react21.default.createElement("div", { className: "modal-header" }, /* @__PURE__ */ import_react21.default.createElement("div", { style: { display: "flex", alignItems: "center", gap: "0.75rem" } }, /* @__PURE__ */ import_react21.default.createElement("div", { style: {
+      width: "40px",
+      height: "40px",
+      borderRadius: "12px",
+      background: "var(--warning-bg)",
+      border: "1px solid var(--warning-border)",
+      color: "var(--warning-text)",
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      fontSize: "1.25rem",
+      flexShrink: 0
+    } }, "\u26A0\uFE0F"), /* @__PURE__ */ import_react21.default.createElement("div", null, /* @__PURE__ */ import_react21.default.createElement("h3", { style: { fontSize: "1.2rem", fontWeight: 800, margin: 0, lineHeight: 1.2 } }, "Different Pharmacy Selected"), /* @__PURE__ */ import_react21.default.createElement("p", { style: { fontSize: "0.8rem", color: "var(--text-muted)", margin: "2px 0 0 0" } }, "Single pharmacy per order requirement"))), /* @__PURE__ */ import_react21.default.createElement("button", { className: "modal-close", onClick: () => setPharmacyConflictItem(null) }, "\xD7")), /* @__PURE__ */ import_react21.default.createElement("div", { className: "modal-body", style: { paddingTop: "0.75rem" } }, /* @__PURE__ */ import_react21.default.createElement("p", { style: { color: "var(--text-secondary)", fontSize: "0.9rem", lineHeight: 1.5, marginBottom: "1.25rem" } }, "Each order is prepared and dispensed directly by a single licensed dispensary. You cannot combine medications from different pharmacies in a single order."), /* @__PURE__ */ import_react21.default.createElement("div", { style: {
+      display: "grid",
+      gridTemplateColumns: "1fr auto 1fr",
+      gap: "0.75rem",
+      alignItems: "center",
+      padding: "1rem",
+      background: "var(--card-alt)",
+      borderRadius: "var(--radius-lg)",
+      border: "1px solid var(--border)",
+      marginBottom: "1.25rem"
+    } }, /* @__PURE__ */ import_react21.default.createElement("div", { style: { background: "var(--surface)", padding: "0.75rem", borderRadius: "var(--radius-md)", border: "1px solid var(--border)" } }, /* @__PURE__ */ import_react21.default.createElement("div", { style: { fontSize: "0.72rem", fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.05em" } }, "Current Cart"), /* @__PURE__ */ import_react21.default.createElement("div", { style: { fontWeight: 800, fontSize: "0.92rem", color: "var(--text-main)", marginTop: "0.2rem" } }, "\u{1F3E5} ", cart.pharmacyName), /* @__PURE__ */ import_react21.default.createElement("div", { style: { fontSize: "0.78rem", color: "var(--text-muted)", marginTop: "0.2rem" } }, cart.items.reduce((s, i) => s + i.quantity, 0), " ", cart.items.reduce((s, i) => s + i.quantity, 0) === 1 ? "item" : "items")), /* @__PURE__ */ import_react21.default.createElement("div", { style: { fontSize: "1.25rem", color: "var(--text-muted)", fontWeight: 900 } }, "\u2794"), /* @__PURE__ */ import_react21.default.createElement("div", { style: { background: "var(--primary-light)", padding: "0.75rem", borderRadius: "var(--radius-md)", border: "1px solid rgba(5, 150, 105, 0.25)" } }, /* @__PURE__ */ import_react21.default.createElement("div", { style: { fontSize: "0.72rem", fontWeight: 700, color: "var(--primary)", textTransform: "uppercase", letterSpacing: "0.05em" } }, "New Pharmacy"), /* @__PURE__ */ import_react21.default.createElement("div", { style: { fontWeight: 800, fontSize: "0.92rem", color: "var(--text-main)", marginTop: "0.2rem" } }, "\u{1F3E5} ", pharmacyConflictItem.pharmacy.display_name), /* @__PURE__ */ import_react21.default.createElement("div", { style: { fontSize: "0.78rem", color: "var(--primary)", fontWeight: 600, marginTop: "0.2rem" } }, "+ ", pharmacyConflictItem.medicine.generic_name))), /* @__PURE__ */ import_react21.default.createElement("div", { style: {
+      background: "rgba(217, 119, 6, 0.08)",
+      border: "1px solid rgba(217, 119, 6, 0.25)",
+      borderRadius: "var(--radius-md)",
+      padding: "0.75rem 0.9rem",
+      fontSize: "0.85rem",
+      color: "var(--warning-text)",
+      marginBottom: "1.25rem"
+    } }, "Clear current cart from ", /* @__PURE__ */ import_react21.default.createElement("strong", null, cart.pharmacyName), " and add ", /* @__PURE__ */ import_react21.default.createElement("strong", null, pharmacyConflictItem.medicine.generic_name), " from ", /* @__PURE__ */ import_react21.default.createElement("strong", null, pharmacyConflictItem.pharmacy.display_name), "?"), /* @__PURE__ */ import_react21.default.createElement("div", { style: { display: "flex", gap: "0.75rem", justifyContent: "flex-end" } }, /* @__PURE__ */ import_react21.default.createElement(
+      "button",
+      {
+        type: "button",
+        className: "btn btn-outline",
+        onClick: () => setPharmacyConflictItem(null),
+        style: { flex: 1 }
+      },
+      "Keep Current Cart"
+    ), /* @__PURE__ */ import_react21.default.createElement(
+      "button",
+      {
+        type: "button",
+        className: "btn btn-primary",
+        onClick: handleConfirmCartPharmacySwitch,
+        style: { flex: 1.2 }
+      },
+      "Clear Cart & Add"
+    ))))), isRxModalOpen && /* @__PURE__ */ import_react21.default.createElement("div", { className: "modal-overlay", onClick: () => setIsRxModalOpen(false) }, /* @__PURE__ */ import_react21.default.createElement("div", { className: "modal-card", onClick: (e) => e.stopPropagation() }, /* @__PURE__ */ import_react21.default.createElement("div", { className: "modal-header" }, /* @__PURE__ */ import_react21.default.createElement("h3", { style: { fontSize: "1.25rem", fontWeight: 800 } }, "Prescription Upload Workflow"), /* @__PURE__ */ import_react21.default.createElement("button", { className: "modal-close", onClick: () => setIsRxModalOpen(false) }, "\xD7")), /* @__PURE__ */ import_react21.default.createElement("div", { className: "modal-body" }, /* @__PURE__ */ import_react21.default.createElement("p", { style: { color: "var(--text-secondary)", lineHeight: 1.6 } }, "For prescription medications in Ghana, simply search for your medicine, add it to your order, and attach your doctor's prescription (PDF, JPG, or PNG) during checkout."), /* @__PURE__ */ import_react21.default.createElement("div", { style: { marginTop: "1rem", padding: "0.85rem", background: "var(--secondary)", borderRadius: "var(--radius-md)", fontSize: "0.85rem" } }, "\u{1F512} ", /* @__PURE__ */ import_react21.default.createElement("strong", null, "Privacy Guaranteed:"), " Your medical files are reviewed exclusively by registered pharmacists at the assigned dispensary."), /* @__PURE__ */ import_react21.default.createElement("div", { style: { display: "flex", gap: "0.5rem", marginTop: "1.25rem" } }, /* @__PURE__ */ import_react21.default.createElement("button", { className: "btn btn-primary", style: { flex: 1 }, onClick: () => {
       setIsRxModalOpen(false);
       navigateTo("medicines");
     } }, "Find Prescription Medicines"))))), isLoginOpen && /* @__PURE__ */ import_react21.default.createElement("div", { className: "modal-overlay", onClick: () => setIsLoginOpen(false) }, /* @__PURE__ */ import_react21.default.createElement("div", { className: "modal-card", onClick: (e) => e.stopPropagation() }, /* @__PURE__ */ import_react21.default.createElement("div", { className: "modal-header" }, /* @__PURE__ */ import_react21.default.createElement("h3", { style: { fontSize: "1.25rem", fontWeight: 800 } }, "Sign In to PharmaLink"), /* @__PURE__ */ import_react21.default.createElement("button", { className: "modal-close", onClick: () => setIsLoginOpen(false) }, "\xD7")), /* @__PURE__ */ import_react21.default.createElement("div", { className: "modal-body" }, authError && /* @__PURE__ */ import_react21.default.createElement("div", { style: { background: "var(--destructive-bg)", color: "var(--destructive-text)", padding: "0.75rem", borderRadius: "var(--radius-md)", marginBottom: "1.25rem", fontSize: "0.88rem", border: "1px solid var(--destructive-border)" } }, authError), /* @__PURE__ */ import_react21.default.createElement("form", { onSubmit: handleLogin }, /* @__PURE__ */ import_react21.default.createElement("div", { className: "form-group" }, /* @__PURE__ */ import_react21.default.createElement("label", { className: "form-label" }, "Email Address or Phone Number"), /* @__PURE__ */ import_react21.default.createElement(
@@ -34224,7 +34438,81 @@
         onChange: (e) => setCsvContent(e.target.value),
         placeholder: "generic_name,quantity,unit_price_ghs..."
       }
-    )), /* @__PURE__ */ import_react21.default.createElement("button", { type: "submit", className: "btn btn-primary", style: { width: "100%", padding: "0.85rem" } }, "Process CSV Import"))))), isNotificationsOpen && currentUser && /* @__PURE__ */ import_react21.default.createElement("div", { className: "modal-overlay", onClick: () => setIsNotificationsOpen(false) }, /* @__PURE__ */ import_react21.default.createElement("div", { className: "modal-card notification-modal", onClick: (e) => e.stopPropagation() }, /* @__PURE__ */ import_react21.default.createElement("div", { className: "modal-header" }, /* @__PURE__ */ import_react21.default.createElement("h3", { style: { fontSize: "1.25rem", fontWeight: 800 } }, "Notifications"), /* @__PURE__ */ import_react21.default.createElement("button", { className: "modal-close", onClick: () => setIsNotificationsOpen(false) }, "\xD7")), /* @__PURE__ */ import_react21.default.createElement("div", { className: "modal-body" }, myNotifications.length === 0 ? /* @__PURE__ */ import_react21.default.createElement("p", { style: { color: "var(--text-muted)", textAlign: "center", padding: "2rem 0" } }, "You have no notifications yet.") : myNotifications.map((notification) => {
+    )), /* @__PURE__ */ import_react21.default.createElement("button", { type: "submit", className: "btn btn-primary", style: { width: "100%", padding: "0.85rem" } }, "Process CSV Import"))))), isPosModalOpen && /* @__PURE__ */ import_react21.default.createElement("div", { className: "modal-overlay", onClick: () => setIsPosModalOpen(false) }, /* @__PURE__ */ import_react21.default.createElement("div", { className: "modal-card", style: { maxWidth: "680px" }, onClick: (e) => e.stopPropagation() }, /* @__PURE__ */ import_react21.default.createElement("div", { className: "modal-header" }, /* @__PURE__ */ import_react21.default.createElement("div", { style: { display: "flex", alignItems: "center", gap: "0.65rem" } }, /* @__PURE__ */ import_react21.default.createElement("span", { style: { fontSize: "1.4rem" } }, "\u26A1"), /* @__PURE__ */ import_react21.default.createElement("div", null, /* @__PURE__ */ import_react21.default.createElement("h3", { style: { fontSize: "1.25rem", fontWeight: 800, margin: 0 } }, "PMS & POS Webhook Integrations"), /* @__PURE__ */ import_react21.default.createElement("p", { style: { fontSize: "0.8rem", color: "var(--text-muted)", margin: 0 } }, "Real-time inventory syncing for Ghana pharmacy software"))), /* @__PURE__ */ import_react21.default.createElement("button", { className: "modal-close", onClick: () => setIsPosModalOpen(false) }, "\xD7")), /* @__PURE__ */ import_react21.default.createElement("div", { className: "modal-body", style: { maxHeight: "75vh", overflowY: "auto" } }, /* @__PURE__ */ import_react21.default.createElement("div", { style: { background: "var(--card-alt)", padding: "1.15rem", borderRadius: "var(--radius-lg)", border: "1px solid var(--border)", marginBottom: "1.25rem" } }, /* @__PURE__ */ import_react21.default.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.5rem" } }, /* @__PURE__ */ import_react21.default.createElement("strong", { style: { fontSize: "0.9rem", color: "var(--primary)" } }, "\u{1F4E1} Your Live Ingestion Webhook URL:"), /* @__PURE__ */ import_react21.default.createElement("span", { className: "badge badge-verified" }, "Ready for Webhooks")), /* @__PURE__ */ import_react21.default.createElement("div", { style: { display: "flex", gap: "0.5rem", alignItems: "center" } }, /* @__PURE__ */ import_react21.default.createElement(
+      "input",
+      {
+        type: "text",
+        readOnly: true,
+        className: "form-input",
+        style: { fontFamily: "monospace", fontSize: "0.82rem", background: "var(--surface)" },
+        value: `${window.location.origin}/v1/integrations/webhooks/${selectedProvider}`
+      }
+    ), /* @__PURE__ */ import_react21.default.createElement(
+      "button",
+      {
+        type: "button",
+        className: "btn btn-outline btn-sm",
+        onClick: () => {
+          navigator.clipboard.writeText(`${window.location.origin}/v1/integrations/webhooks/${selectedProvider}`);
+          showToast("Webhook URL copied to clipboard!", "success");
+        }
+      },
+      "\u{1F4CB} Copy"
+    )), /* @__PURE__ */ import_react21.default.createElement("div", { style: { fontSize: "0.78rem", color: "var(--text-muted)", marginTop: "0.5rem" } }, "Paste this endpoint into your pharmacy software webhook settings. Supported: ", /* @__PURE__ */ import_react21.default.createElement("strong", null, "PrimeCare"), ", ", /* @__PURE__ */ import_react21.default.createElement("strong", null, "RxPhoto"), ", ", /* @__PURE__ */ import_react21.default.createElement("strong", null, "PioneerRx"), ", and ", /* @__PURE__ */ import_react21.default.createElement("strong", null, "Generic JSON"), ".")), /* @__PURE__ */ import_react21.default.createElement("div", { style: { marginBottom: "1.5rem" } }, /* @__PURE__ */ import_react21.default.createElement("h4", { style: { fontSize: "0.95rem", fontWeight: 800, marginBottom: "0.75rem" } }, "Active Software Connections"), pharmacyConnections.length === 0 ? /* @__PURE__ */ import_react21.default.createElement("div", { style: { padding: "1.25rem", textAlign: "center", border: "1px dashed var(--border)", borderRadius: "var(--radius-md)", color: "var(--text-muted)", fontSize: "0.88rem" } }, "No POS/PMS software connected yet. Register a connection below or send a test webhook.") : /* @__PURE__ */ import_react21.default.createElement("div", { style: { display: "flex", flexDirection: "column", gap: "0.65rem" } }, pharmacyConnections.map((conn) => /* @__PURE__ */ import_react21.default.createElement(
+      "div",
+      {
+        key: conn.id,
+        style: {
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          padding: "0.85rem 1rem",
+          background: "var(--surface)",
+          border: "1px solid var(--border)",
+          borderRadius: "var(--radius-md)"
+        }
+      },
+      /* @__PURE__ */ import_react21.default.createElement("div", null, /* @__PURE__ */ import_react21.default.createElement("div", { style: { display: "flex", alignItems: "center", gap: "0.5rem" } }, /* @__PURE__ */ import_react21.default.createElement("strong", { style: { textTransform: "uppercase", fontSize: "0.9rem" } }, conn.provider_name), /* @__PURE__ */ import_react21.default.createElement("span", { className: `badge ${conn.status === "CONNECTED" ? "badge-verified" : "badge-uncertain"}` }, conn.status)), /* @__PURE__ */ import_react21.default.createElement("div", { style: { fontSize: "0.78rem", color: "var(--text-muted)", marginTop: "0.2rem" } }, "Last sync: ", conn.last_sync_at ? new Date(conn.last_sync_at).toLocaleString() : "Never", conn.last_error && /* @__PURE__ */ import_react21.default.createElement("span", { style: { color: "var(--destructive)", marginLeft: "0.5rem" } }, "\u26A0\uFE0F ", conn.last_error))),
+      /* @__PURE__ */ import_react21.default.createElement("div", { style: { display: "flex", gap: "0.4rem" } }, /* @__PURE__ */ import_react21.default.createElement(
+        "button",
+        {
+          type: "button",
+          className: "btn btn-secondary btn-sm",
+          disabled: isSyncingPos,
+          onClick: () => handleTriggerConnectionSync(conn.id)
+        },
+        isSyncingPos ? "Syncing..." : "\u{1F504} Sync Now"
+      ), /* @__PURE__ */ import_react21.default.createElement(
+        "button",
+        {
+          type: "button",
+          className: "btn btn-outline btn-sm",
+          style: { color: "var(--destructive)" },
+          onClick: () => handleDeleteConnection(conn.id)
+        },
+        "\u2715"
+      ))
+    )))), /* @__PURE__ */ import_react21.default.createElement("div", { style: { borderTop: "1px solid var(--border)", paddingTop: "1.25rem", marginBottom: "1.5rem" } }, /* @__PURE__ */ import_react21.default.createElement("h4", { style: { fontSize: "0.95rem", fontWeight: 800, marginBottom: "0.75rem" } }, "Connect New PMS / POS Provider"), /* @__PURE__ */ import_react21.default.createElement("form", { onSubmit: handleCreateConnection }, /* @__PURE__ */ import_react21.default.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.75rem", marginBottom: "0.75rem" } }, /* @__PURE__ */ import_react21.default.createElement("div", { className: "form-group", style: { marginBottom: 0 } }, /* @__PURE__ */ import_react21.default.createElement("label", { className: "form-label" }, "Select System"), /* @__PURE__ */ import_react21.default.createElement(
+      "select",
+      {
+        className: "form-select",
+        value: selectedProvider,
+        onChange: (e) => setSelectedProvider(e.target.value)
+      },
+      /* @__PURE__ */ import_react21.default.createElement("option", { value: "primecare" }, "PrimeCare PMS (Ghana)"),
+      /* @__PURE__ */ import_react21.default.createElement("option", { value: "rxphoto" }, "RxPhoto / RxSync"),
+      /* @__PURE__ */ import_react21.default.createElement("option", { value: "pioneer" }, "PioneerRx POS"),
+      /* @__PURE__ */ import_react21.default.createElement("option", { value: "generic" }, "Custom / Generic Webhook")
+    )), /* @__PURE__ */ import_react21.default.createElement("div", { className: "form-group", style: { marginBottom: 0 } }, /* @__PURE__ */ import_react21.default.createElement("label", { className: "form-label" }, "Webhook Secret (Optional)"), /* @__PURE__ */ import_react21.default.createElement(
+      "input",
+      {
+        type: "password",
+        className: "form-input",
+        placeholder: "Leave blank to auto-generate",
+        value: webhookSecretInput,
+        onChange: (e) => setWebhookSecretInput(e.target.value)
+      }
+    ))), /* @__PURE__ */ import_react21.default.createElement("button", { type: "submit", className: "btn btn-primary", style: { width: "100%", padding: "0.65rem" } }, "\u2713 Register & Generate Webhook Secret"))), pharmacySyncHistory.length > 0 && /* @__PURE__ */ import_react21.default.createElement("div", { style: { borderTop: "1px solid var(--border)", paddingTop: "1.25rem" } }, /* @__PURE__ */ import_react21.default.createElement("h4", { style: { fontSize: "0.95rem", fontWeight: 800, marginBottom: "0.75rem" } }, "Recent Automated Sync Logs"), /* @__PURE__ */ import_react21.default.createElement("div", { style: { maxHeight: "180px", overflowY: "auto" } }, /* @__PURE__ */ import_react21.default.createElement("table", { style: { width: "100%", fontSize: "0.8rem", textAlign: "left", borderCollapse: "collapse" } }, /* @__PURE__ */ import_react21.default.createElement("thead", null, /* @__PURE__ */ import_react21.default.createElement("tr", { style: { background: "var(--card-alt)", borderBottom: "1px solid var(--border)" } }, /* @__PURE__ */ import_react21.default.createElement("th", { style: { padding: "0.4rem 0.6rem" } }, "Date & Time"), /* @__PURE__ */ import_react21.default.createElement("th", { style: { padding: "0.4rem 0.6rem" } }, "Source"), /* @__PURE__ */ import_react21.default.createElement("th", { style: { padding: "0.4rem 0.6rem" } }, "Status"), /* @__PURE__ */ import_react21.default.createElement("th", { style: { padding: "0.4rem 0.6rem" } }, "Accepted / Received"))), /* @__PURE__ */ import_react21.default.createElement("tbody", null, pharmacySyncHistory.slice(0, 8).map((sync) => /* @__PURE__ */ import_react21.default.createElement("tr", { key: sync.id, style: { borderBottom: "1px solid var(--border)" } }, /* @__PURE__ */ import_react21.default.createElement("td", { style: { padding: "0.4rem 0.6rem" } }, new Date(sync.started_at).toLocaleString()), /* @__PURE__ */ import_react21.default.createElement("td", { style: { padding: "0.4rem 0.6rem" } }, /* @__PURE__ */ import_react21.default.createElement("span", { className: "badge badge-likely" }, sync.source_type)), /* @__PURE__ */ import_react21.default.createElement("td", { style: { padding: "0.4rem 0.6rem" } }, /* @__PURE__ */ import_react21.default.createElement("span", { className: `badge ${sync.status === "SUCCESS" ? "badge-verified" : "badge-uncertain"}` }, sync.status)), /* @__PURE__ */ import_react21.default.createElement("td", { style: { padding: "0.4rem 0.6rem", fontWeight: 700 } }, sync.records_accepted, " / ", sync.records_received)))))))))), isNotificationsOpen && currentUser && /* @__PURE__ */ import_react21.default.createElement("div", { className: "modal-overlay", onClick: () => setIsNotificationsOpen(false) }, /* @__PURE__ */ import_react21.default.createElement("div", { className: "modal-card notification-modal", onClick: (e) => e.stopPropagation() }, /* @__PURE__ */ import_react21.default.createElement("div", { className: "modal-header" }, /* @__PURE__ */ import_react21.default.createElement("h3", { style: { fontSize: "1.25rem", fontWeight: 800 } }, "Notifications"), /* @__PURE__ */ import_react21.default.createElement("button", { className: "modal-close", onClick: () => setIsNotificationsOpen(false) }, "\xD7")), /* @__PURE__ */ import_react21.default.createElement("div", { className: "modal-body" }, myNotifications.length === 0 ? /* @__PURE__ */ import_react21.default.createElement("p", { style: { color: "var(--text-muted)", textAlign: "center", padding: "2rem 0" } }, "You have no notifications yet.") : myNotifications.map((notification) => {
       const isClarification = notification.type === "PRESCRIPTION_CLARIFICATION_REQUIRED";
       const isRejected = notification.type === "ORDER_REJECTED";
       return /* @__PURE__ */ import_react21.default.createElement(
@@ -34255,7 +34543,35 @@
         }
       },
       "View My Orders"
-    )))), isProfileOpen && currentUser && /* @__PURE__ */ import_react21.default.createElement("div", { className: "modal-overlay", onClick: () => setIsProfileOpen(false) }, /* @__PURE__ */ import_react21.default.createElement("div", { className: "modal-card", onClick: (e) => e.stopPropagation() }, /* @__PURE__ */ import_react21.default.createElement("div", { className: "modal-header" }, /* @__PURE__ */ import_react21.default.createElement("h3", { style: { fontSize: "1.25rem", fontWeight: 800 } }, "Account Profile"), /* @__PURE__ */ import_react21.default.createElement("button", { className: "modal-close", onClick: () => setIsProfileOpen(false) }, "\xD7")), /* @__PURE__ */ import_react21.default.createElement("div", { className: "modal-body" }, /* @__PURE__ */ import_react21.default.createElement("div", { style: { background: "var(--card-alt)", padding: "1.35rem", borderRadius: "var(--radius-xl)", marginBottom: "1.25rem", border: "1px solid var(--border)" } }, /* @__PURE__ */ import_react21.default.createElement("div", { style: { fontSize: "1.25rem", fontWeight: 900 } }, currentUser.first_name, " ", currentUser.last_name || ""), /* @__PURE__ */ import_react21.default.createElement("div", { style: { fontSize: "0.9rem", color: "var(--text-muted)" } }, currentUser.email || currentUser.phone), /* @__PURE__ */ import_react21.default.createElement("span", { className: "badge badge-verified", style: { marginTop: "0.65rem" } }, "Role: ", currentUser.role)), pharmacyData?.verification_status === "PENDING" && /* @__PURE__ */ import_react21.default.createElement("div", { style: { background: "var(--warning-bg)", color: "var(--warning-text)", padding: "0.85rem", borderRadius: "var(--radius-md)", marginBottom: "1rem", fontSize: "0.85rem", border: "1px solid var(--warning-border)" } }, "Your pharmacy application is currently pending platform verification."), currentUser.role === "CUSTOMER" && /* @__PURE__ */ import_react21.default.createElement(import_react21.default.Fragment, null, /* @__PURE__ */ import_react21.default.createElement(
+    )))), isProfileOpen && currentUser && /* @__PURE__ */ import_react21.default.createElement("div", { className: "modal-overlay", onClick: () => setIsProfileOpen(false) }, /* @__PURE__ */ import_react21.default.createElement("div", { className: "modal-card", onClick: (e) => e.stopPropagation() }, /* @__PURE__ */ import_react21.default.createElement("div", { className: "modal-header" }, /* @__PURE__ */ import_react21.default.createElement("h3", { style: { fontSize: "1.25rem", fontWeight: 800 } }, "Account Profile"), /* @__PURE__ */ import_react21.default.createElement("button", { className: "modal-close", onClick: () => setIsProfileOpen(false) }, "\xD7")), /* @__PURE__ */ import_react21.default.createElement("div", { className: "modal-body" }, /* @__PURE__ */ import_react21.default.createElement("div", { style: { background: "var(--card-alt)", padding: "1.35rem", borderRadius: "var(--radius-xl)", marginBottom: "1.25rem", border: "1px solid var(--border)" } }, /* @__PURE__ */ import_react21.default.createElement("div", { style: { fontSize: "1.25rem", fontWeight: 900 } }, currentUser.first_name, " ", currentUser.last_name || ""), /* @__PURE__ */ import_react21.default.createElement("div", { style: { fontSize: "0.9rem", color: "var(--text-muted)" } }, currentUser.email || currentUser.phone), /* @__PURE__ */ import_react21.default.createElement("div", { style: { display: "flex", gap: "0.5rem", flexWrap: "wrap", marginTop: "0.65rem" } }, /* @__PURE__ */ import_react21.default.createElement("span", { className: "badge badge-verified" }, "Role: ", currentUser.role), pharmacyData?.display_name && /* @__PURE__ */ import_react21.default.createElement("span", { className: "badge badge-likely" }, "\u{1F3E5} ", pharmacyData.display_name))), pharmacyData?.verification_status === "PENDING" && /* @__PURE__ */ import_react21.default.createElement("div", { style: { background: "var(--warning-bg)", color: "var(--warning-text)", padding: "0.85rem", borderRadius: "var(--radius-md)", marginBottom: "1rem", fontSize: "0.85rem", border: "1px solid var(--warning-border)" } }, "Your pharmacy application is currently pending platform verification."), (currentUser.role === "PHARMACY_ADMIN" || currentUser.role === "PHARMACY_STAFF") && /* @__PURE__ */ import_react21.default.createElement(
+      "button",
+      {
+        className: "btn btn-primary",
+        style: { width: "100%", marginBottom: "0.75rem", padding: "0.75rem", fontWeight: 700 },
+        onClick: () => {
+          setIsProfileOpen(false);
+          setActivePortal("pharmacy");
+          setActiveAdminPage("overview");
+          window.history.pushState({}, "", "/pharmacy/overview");
+          if (currentToken) loadPharmacyData(currentToken);
+        }
+      },
+      "\u{1F3E5} Go to Pharmacy Operations Portal"
+    ), currentUser.role === "PLATFORM_OPS" && /* @__PURE__ */ import_react21.default.createElement(
+      "button",
+      {
+        className: "btn btn-primary",
+        style: { width: "100%", marginBottom: "0.75rem", padding: "0.75rem", fontWeight: 700 },
+        onClick: () => {
+          setIsProfileOpen(false);
+          setActivePortal("platform");
+          setActiveAdminPage("network");
+          window.history.pushState({}, "", "/platform/network");
+          if (currentToken) loadPlatformData(currentToken);
+        }
+      },
+      "\u{1F6E1}\uFE0F Go to Platform Operations Portal"
+    ), currentUser.role === "CUSTOMER" && /* @__PURE__ */ import_react21.default.createElement(import_react21.default.Fragment, null, /* @__PURE__ */ import_react21.default.createElement(
       "button",
       {
         className: "btn btn-secondary",

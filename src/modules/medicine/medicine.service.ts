@@ -104,6 +104,7 @@ export class MedicineService {
 
     const normalized = this.normalizeSearchTerm(queryStr);
     const tokens = normalized.split(' ').filter(Boolean);
+    const firstToken = tokens[0] || normalized;
 
     // Search against medicines generic_name, brand_name, and medicine_aliases
     const res = await db.query(
@@ -115,10 +116,12 @@ export class MedicineService {
            LOWER(m.generic_name) LIKE '%' || $1 || '%'
            OR LOWER(COALESCE(m.brand_name, '')) LIKE '%' || $1 || '%'
            OR ma.normalized_alias LIKE '%' || $1 || '%'
-           ${tokens.length > 1 ? `OR (LOWER(m.generic_name) LIKE '%' || $2 || '%' AND LOWER(COALESCE(m.brand_name, '')) LIKE '%' || $3 || '%')` : ''}
+           OR LOWER(m.generic_name) LIKE '%' || $2 || '%'
+           OR LOWER(COALESCE(m.brand_name, '')) LIKE '%' || $2 || '%'
+           OR ma.normalized_alias LIKE '%' || $2 || '%'
          )
        LIMIT 30`,
-      tokens.length > 1 ? [normalized, tokens[0], tokens[1]] : [normalized]
+      [normalized, firstToken]
     );
 
     return res.rows;

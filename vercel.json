@@ -1,0 +1,16 @@
+{
+  "rewrites": [
+    {
+      "source": "/v1/:match*",
+      "destination": "/api"
+    },
+    {
+      "source": "/health",
+      "destination": "/api"
+    },
+    {
+      "source": "/((?!assets|uploads|app.js|index.html|styles.css|favicon.ico|manifest.json).*)",
+      "destination": "/index.html"
+    }
+  ]
+}

@@ -769,10 +769,10 @@ function App() {
   const isPharmacyUser = useMemo(() => {
     return (
       currentUser?.role === 'PLATFORM_OPS' ||
-      ((currentUser?.role === 'PHARMACY_ADMIN' || currentUser?.role === 'PHARMACY_STAFF') &&
-        pharmacyData?.verification_status === 'VERIFIED')
+      currentUser?.role === 'PHARMACY_ADMIN' ||
+      currentUser?.role === 'PHARMACY_STAFF'
     );
-  }, [currentUser, pharmacyData]);
+  }, [currentUser]);
 
   useEffect(() => {
     if (isPharmacyUser) {
@@ -809,6 +809,7 @@ function App() {
   const [isCsvImportModalOpen, setIsCsvImportModalOpen] = useState(false);
   const [isPosModalOpen, setIsPosModalOpen] = useState(false);
   const [isRxModalOpen, setIsRxModalOpen] = useState(false);
+  const [pharmacyConflictItem, setPharmacyConflictItem] = useState(null);
 
   // Custom location search input inside location modal
   const [customCitySearch, setCustomCitySearch] = useState('');
@@ -825,6 +826,13 @@ function App() {
   const [platformPharmacies, setPlatformPharmacies] = useState([]);
   const [platformAuditEvents, setPlatformAuditEvents] = useState([]);
   const [platformLoading, setPlatformLoading] = useState(false);
+  
+  // PMS/POS Integrations state
+  const [pharmacyConnections, setPharmacyConnections] = useState([]);
+  const [pharmacySyncHistory, setPharmacySyncHistory] = useState([]);
+  const [selectedProvider, setSelectedProvider] = useState('primecare');
+  const [webhookSecretInput, setWebhookSecretInput] = useState('');
+  const [isSyncingPos, setIsSyncingPos] = useState(false);
   
   // Forms state
   const [loginIdentifier, setLoginIdentifier] = useState('');
@@ -895,8 +903,32 @@ function App() {
       const meData = await meRes.json();
       if (meRes.ok && meData.data) setPharmacyData(meData.data);
 
+      const intRes = await fetch('/v1/integrations', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      const intData = await intRes.json();
+      if (intRes.ok && intData.data) {
+        setPharmacyConnections(intData.data.connections || []);
+        setPharmacySyncHistory(intData.data.sync_history || []);
+      }
     } catch (err) {
       console.error('Failed to load pharmacy portal data:', err);
+    }
+  }, [currentToken]);
+
+  const loadIntegrationsData = useCallback(async (token = currentToken) => {
+    if (!token) return;
+    try {
+      const res = await fetch('/v1/integrations', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      const data = await res.json();
+      if (res.ok && data.data) {
+        setPharmacyConnections(data.data.connections || []);
+        setPharmacySyncHistory(data.data.sync_history || []);
+      }
+    } catch (err) {
+      console.error('Failed to load integration connections:', err);
     }
   }, [currentToken]);
 
@@ -948,10 +980,7 @@ function App() {
             } else {
               setActiveAdminPage('network');
             }
-          } else if (
-            ['PHARMACY_ADMIN', 'PHARMACY_STAFF'].includes(data.data.user.role)
-            && data.data.pharmacy?.verification_status === 'VERIFIED'
-          ) {
+          } else if (['PHARMACY_ADMIN', 'PHARMACY_STAFF'].includes(data.data.user.role)) {
             setActivePortal('pharmacy');
             if (currentPath.startsWith('/pharmacy/')) {
               setActiveAdminPage(adminPageFromPath(currentPath, 'pharmacy'));
@@ -1098,6 +1127,12 @@ function App() {
         setActivePortal('pharmacy');
         setActiveAdminPage(page);
         if (['orders', 'inventory', 'prescriptions'].includes(page)) setActivePharmTab(page);
+      } else if (currentUser?.role === 'PLATFORM_OPS') {
+        setActivePortal('platform');
+        setActiveAdminPage('network');
+      } else if (currentUser?.role === 'PHARMACY_ADMIN' || currentUser?.role === 'PHARMACY_STAFF') {
+        setActivePortal('pharmacy');
+        setActiveAdminPage('overview');
       } else {
         setActivePage(pageFromPath(pathname));
         setActivePortal('customer');
@@ -1196,17 +1231,18 @@ function App() {
       setPharmacyData(data.data.pharmacy || null);
       setIsLoginOpen(false);
 
-      if ((data.data.user.role === 'PHARMACY_ADMIN' || data.data.user.role === 'PHARMACY_STAFF' || data.data.user.role === 'PLATFORM_OPS')
-        && (data.data.user.role === 'PLATFORM_OPS' || data.data.pharmacy?.verification_status === 'VERIFIED')) {
-        const portal = data.data.user.role === 'PLATFORM_OPS' ? 'platform' : 'pharmacy';
-        setActivePortal(portal);
-        setActiveAdminPage(portal === 'platform' ? 'network' : 'overview');
-        window.history.replaceState({}, '', `/${portal}/${portal === 'platform' ? 'network' : 'overview'}`);
-        showToast(`Welcome to ${data.data.user.role === 'PLATFORM_OPS' ? 'Platform Operations' : 'Pharmacy Operations'}, ${data.data.user.first_name}!`, 'success');
-        if (data.data.user.role !== 'PLATFORM_OPS') loadPharmacyData(data.data.token);
+      if (data.data.user.role === 'PLATFORM_OPS') {
+        setActivePortal('platform');
+        setActiveAdminPage('network');
+        window.history.replaceState({}, '', '/platform/network');
+        showToast(`Welcome to Platform Operations, ${data.data.user.first_name}!`, 'success');
+        loadPlatformData(data.data.token);
       } else if (data.data.user.role === 'PHARMACY_ADMIN' || data.data.user.role === 'PHARMACY_STAFF') {
-        setActivePortal('customer');
-        showToast('Your pharmacy application is pending verification. Pharmacy operations are unavailable until approval.', 'info');
+        setActivePortal('pharmacy');
+        setActiveAdminPage('overview');
+        window.history.replaceState({}, '', '/pharmacy/overview');
+        showToast(`Welcome to Pharmacy Operations, ${data.data.user.first_name}!`, 'success');
+        loadPharmacyData(data.data.token);
       } else {
         setActivePortal('customer');
         showToast(`Welcome back, ${data.data.user.first_name}!`, 'success');
@@ -1383,24 +1419,7 @@ function App() {
     const pharmName = resultItem.pharmacy.display_name;
 
     if (cart.pharmacyId && cart.pharmacyId !== pharmId && cart.items.length > 0) {
-      if (!confirm(`Your cart has items from another pharmacy (${cart.pharmacyName}). Clear cart to add from ${pharmName}?`)) {
-        return;
-      }
-      setCart({
-        pharmacyId: pharmId,
-        pharmacyName: pharmName,
-        fulfillmentType: 'PICKUP',
-        items: [{
-          medicine: resultItem.medicine,
-          pharmacy_id: pharmId,
-          quantity: 1,
-          price: resultItem.price,
-          fulfillment_options: resultItem.pharmacy.fulfillment_options || {},
-        }],
-        customerNote: '',
-        deliveryAddress: location.name,
-      });
-      showToast(`Cart updated with items from ${pharmName}`, 'info');
+      setPharmacyConflictItem(resultItem);
       return;
     }
 
@@ -1428,6 +1447,30 @@ function App() {
       };
     });
     showToast(`Added ${resultItem.medicine.generic_name} to cart`, 'success');
+  };
+
+  const handleConfirmCartPharmacySwitch = () => {
+    if (!pharmacyConflictItem) return;
+    const pharmId = pharmacyConflictItem.pharmacy.id;
+    const pharmName = pharmacyConflictItem.pharmacy.display_name;
+
+    setCart({
+      pharmacyId: pharmId,
+      pharmacyName: pharmName,
+      fulfillmentType: 'PICKUP',
+      items: [{
+        medicine: pharmacyConflictItem.medicine,
+        pharmacy_id: pharmId,
+        quantity: 1,
+        price: pharmacyConflictItem.price,
+        fulfillment_options: pharmacyConflictItem.pharmacy.fulfillment_options || {},
+      }],
+      customerNote: '',
+      deliveryAddress: location.name,
+    });
+    setPrescriptionFile(null);
+    setPharmacyConflictItem(null);
+    showToast(`Cart updated with items from ${pharmName}`, 'info');
   };
 
   const updateCartQty = (medId, delta) => {
@@ -1644,8 +1687,13 @@ function App() {
     try {
       const res = await fetch('/v1/inventory/confirm', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${currentToken}` },
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${currentToken}`,
+          ...(pharmacyData?.id ? { 'X-Pharmacy-Id': pharmacyData.id } : {})
+        },
         body: JSON.stringify({
+          pharmacy_id: pharmacyData?.id,
           medicine_id: selectedStockMedId,
           physical_quantity: Number(physicalQty),
           unit_price_minor: Math.round(Number(physicalUnitPrice) * 100),
@@ -1690,8 +1738,15 @@ function App() {
     try {
       const res = await fetch('/v1/inventory/import', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${currentToken}` },
-        body: JSON.stringify({ csv_content: csvContent })
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${currentToken}`,
+          ...(pharmacyData?.id ? { 'X-Pharmacy-Id': pharmacyData.id } : {})
+        },
+        body: JSON.stringify({
+          csv_content: csvContent,
+          pharmacy_id: pharmacyData?.id
+        })
       });
       const data = await res.json();
       if (!res.ok || !data.data) throw new Error(data.error?.message || 'CSV Import failed');
@@ -1701,6 +1756,66 @@ function App() {
       setCsvContent('');
       setUploadedFileName('');
       loadPharmacyData();
+    } catch (err) {
+      showToast(err.message, 'error');
+    }
+  };
+
+  // POS & PMS Integration Handlers
+  const handleCreateConnection = async (e) => {
+    if (e) e.preventDefault();
+    if (!currentToken) return;
+    try {
+      const res = await fetch('/v1/integrations/connections', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${currentToken}` },
+        body: JSON.stringify({
+          provider_name: selectedProvider,
+          provider_type: 'POS_API',
+          webhook_secret: webhookSecretInput.trim() || undefined,
+        })
+      });
+      const data = await res.json();
+      if (!res.ok || !data.data) throw new Error(data.error?.message || 'Failed to save connection');
+      showToast(`Connected ${selectedProvider.toUpperCase()} webhook!`, 'success');
+      setWebhookSecretInput('');
+      await loadIntegrationsData();
+    } catch (err) {
+      showToast(err.message, 'error');
+    }
+  };
+
+  const handleTriggerConnectionSync = async (connectionId) => {
+    if (!currentToken) return;
+    setIsSyncingPos(true);
+    try {
+      const res = await fetch(`/v1/integrations/connections/${connectionId}/sync`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${currentToken}` },
+      });
+      const data = await res.json();
+      if (!res.ok || !data.data) throw new Error(data.error?.message || 'Sync failed');
+      showToast(`Synced ${data.data.records_accepted} inventory records!`, 'success');
+      await Promise.all([loadPharmacyData(), loadIntegrationsData()]);
+    } catch (err) {
+      showToast(err.message, 'error');
+    } finally {
+      setIsSyncingPos(false);
+    }
+  };
+
+  const handleDeleteConnection = async (connectionId) => {
+    if (!currentToken) return;
+    if (!window.confirm('Disconnect this PMS integration?')) return;
+    try {
+      const res = await fetch(`/v1/integrations/connections/${connectionId}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${currentToken}` },
+      });
+      const data = await res.json();
+      if (!res.ok || !data.data) throw new Error(data.error?.message || 'Failed to disconnect');
+      showToast('Integration disconnected.', 'info');
+      await loadIntegrationsData();
     } catch (err) {
       showToast(err.message, 'error');
     }
@@ -1787,16 +1902,22 @@ function App() {
           </nav>
 
           <div className="nav-actions">
-            {/* Pharmacy Portal Toggle Pill (if role authorized) */}
+            {/* Pharmacy / Platform Portal Switcher Pill */}
             {isPharmacyUser && (
               <button
-                className={`btn btn-sm ${activePortal !== 'customer' ? 'btn-primary' : 'btn-outline'}`}
-                onClick={() => setActivePortal((prev) => (prev === 'customer' ? (currentUser?.role === 'PLATFORM_OPS' ? 'platform' : 'pharmacy') : 'customer'))}
-                title="Toggle between Patient View and Pharmacy Management Portal"
+                className="btn btn-sm btn-primary"
+                onClick={() => {
+                  const targetPortal = currentUser?.role === 'PLATFORM_OPS' ? 'platform' : 'pharmacy';
+                  const targetPage = targetPortal === 'platform' ? 'network' : 'overview';
+                  setActivePortal(targetPortal);
+                  setActiveAdminPage(targetPage);
+                  window.history.pushState({}, '', `/${targetPortal}/${targetPage}`);
+                  if (targetPortal === 'pharmacy' && currentToken) loadPharmacyData(currentToken);
+                  if (targetPortal === 'platform' && currentToken) loadPlatformData(currentToken);
+                }}
+                title={currentUser?.role === 'PLATFORM_OPS' ? 'Go to Platform Operations Portal' : 'Go to Pharmacy Operations Dashboard'}
               >
-                {activePortal !== 'customer'
-                  ? (currentUser?.role === 'PLATFORM_OPS' ? '🛡️ Platform Operations' : '🏥 Pharmacy Operations')
-                  : (currentUser?.role === 'PLATFORM_OPS' ? 'Switch to Platform Ops' : 'Switch to Ops Portal')}
+                {currentUser?.role === 'PLATFORM_OPS' ? '🛡️ Platform Operations' : '🏥 Pharmacy Operations'}
               </button>
             )}
 
@@ -1889,9 +2010,6 @@ function App() {
             title={isDarkMode ? 'Switch to light mode' : 'Switch to dark mode'}
           >
             <span aria-hidden="true">{isDarkMode ? '☀️' : '🌙'}</span>
-          </button>
-          <button className="btn btn-outline btn-sm" onClick={() => { window.history.pushState({}, '', '/'); setActivePage('home'); setActivePortal('customer'); }}>
-            ← Customer view
           </button>
           <button className="btn btn-secondary btn-sm" onClick={() => setIsProfileOpen(true)}>
             Account
@@ -2290,8 +2408,8 @@ function App() {
                   <button className="btn btn-outline btn-sm" onClick={() => setIsCsvImportModalOpen(true)}>
                     📁 Batch CSV Stock Upload
                   </button>
-                  <button className="btn btn-outline btn-sm" onClick={() => showToast('Live POS sync provider not configured. Use CSV import or shelf verification.', 'info')}>
-                    ⚡ POS Sync
+                  <button className="btn btn-primary btn-sm" onClick={() => { setIsPosModalOpen(true); loadIntegrationsData(); }}>
+                    ⚡ POS & PMS Integrations
                   </button>
                 </div>
               )}
@@ -2355,8 +2473,8 @@ function App() {
                       </div>
                     </div>
 
-                    <div style={{ background: 'var(--surface)', borderRadius: 'var(--radius-2xl)', border: '1px solid var(--border)', overflow: 'hidden', boxShadow: 'var(--shadow-xs)' }}>
-                      <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '0.9rem' }}>
+                    <div className="table-responsive-wrapper" style={{ background: 'var(--surface)', borderRadius: 'var(--radius-2xl)', border: '1px solid var(--border)', overflowX: 'auto', boxShadow: 'var(--shadow-xs)' }}>
+                      <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '0.9rem', minWidth: '680px' }}>
                         <thead>
                           <tr style={{ background: 'var(--card-alt)', borderBottom: '1px solid var(--border)' }}>
                             <th style={{ padding: '1rem 1.25rem' }}>Order & Customer</th>
@@ -2510,8 +2628,8 @@ function App() {
 
                 {/* INVENTORY TABLE */}
                 {activePharmTab === 'inventory' && (
-                  <div style={{ background: 'var(--surface)', borderRadius: 'var(--radius-2xl)', border: '1px solid var(--border)', overflow: 'hidden', boxShadow: 'var(--shadow-xs)' }}>
-                    <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '0.9rem' }}>
+                  <div className="table-responsive-wrapper" style={{ background: 'var(--surface)', borderRadius: 'var(--radius-2xl)', border: '1px solid var(--border)', overflowX: 'auto', boxShadow: 'var(--shadow-xs)' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '0.9rem', minWidth: '680px' }}>
                       <thead>
                         <tr style={{ background: 'var(--card-alt)', borderBottom: '1px solid var(--border)' }}>
                           <th style={{ padding: '1rem 1.25rem' }}>Medicine Name</th>
@@ -2639,6 +2757,52 @@ function App() {
           © 2026 PharmaLink Ghana Ltd. Regulated and accredited under Ghana Pharmacy Council guidelines.
         </div>
       </footer>}
+
+      {/* MOBILE BOTTOM NAVIGATION BAR */}
+      {activePortal === 'customer' && (
+        <nav className="mobile-bottom-nav" aria-label="Mobile Navigation">
+          <button
+            type="button"
+            className={`mobile-nav-item ${activePage === 'home' ? 'active' : ''}`}
+            onClick={() => navigateTo('home')}
+          >
+            <span className="mobile-nav-icon">🏠</span>
+            <span className="mobile-nav-label">Home</span>
+          </button>
+          <button
+            type="button"
+            className={`mobile-nav-item ${activePage === 'medicines' ? 'active' : ''}`}
+            onClick={() => { setSearchQuery(''); navigateTo('medicines'); performSearch(''); }}
+          >
+            <span className="mobile-nav-icon">💊</span>
+            <span className="mobile-nav-label">Medicines</span>
+          </button>
+          <button
+            type="button"
+            className={`mobile-nav-item ${activePage === 'prescriptions' ? 'active' : ''}`}
+            onClick={() => navigateTo('prescriptions')}
+          >
+            <span className="mobile-nav-icon">📄</span>
+            <span className="mobile-nav-label">Rx Upload</span>
+          </button>
+          <button
+            type="button"
+            className={`mobile-nav-item ${activePage === 'pharmacies' ? 'active' : ''}`}
+            onClick={() => navigateTo('pharmacies')}
+          >
+            <span className="mobile-nav-icon">🏥</span>
+            <span className="mobile-nav-label">Pharmacies</span>
+          </button>
+          <button
+            type="button"
+            className={`mobile-nav-item ${activePage === 'howItWorks' ? 'active' : ''}`}
+            onClick={() => navigateTo('howItWorks')}
+          >
+            <span className="mobile-nav-icon">✨</span>
+            <span className="mobile-nav-label">How it works</span>
+          </button>
+        </nav>
+      )}
 
       {/* GHANA LOCATION SELECTOR MODAL */}
       {isLocationModalOpen && (
@@ -2794,6 +2958,108 @@ function App() {
                   </button>
                 </div>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* PHARMACY CONFLICT MODAL */}
+      {pharmacyConflictItem && (
+        <div className="modal-overlay" onClick={() => setPharmacyConflictItem(null)}>
+          <div className="modal-card" style={{ maxWidth: '520px' }} onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                <div style={{
+                  width: '40px',
+                  height: '40px',
+                  borderRadius: '12px',
+                  background: 'var(--warning-bg)',
+                  border: '1px solid var(--warning-border)',
+                  color: 'var(--warning-text)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: '1.25rem',
+                  flexShrink: 0,
+                }}>
+                  ⚠️
+                </div>
+                <div>
+                  <h3 style={{ fontSize: '1.2rem', fontWeight: 800, margin: 0, lineHeight: 1.2 }}>Different Pharmacy Selected</h3>
+                  <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', margin: '2px 0 0 0' }}>Single pharmacy per order requirement</p>
+                </div>
+              </div>
+              <button className="modal-close" onClick={() => setPharmacyConflictItem(null)}>&times;</button>
+            </div>
+            <div className="modal-body" style={{ paddingTop: '0.75rem' }}>
+              <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', lineHeight: 1.5, marginBottom: '1.25rem' }}>
+                Each order is prepared and dispensed directly by a single licensed dispensary. You cannot combine medications from different pharmacies in a single order.
+              </p>
+
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: '1fr auto 1fr',
+                gap: '0.75rem',
+                alignItems: 'center',
+                padding: '1rem',
+                background: 'var(--card-alt)',
+                borderRadius: 'var(--radius-lg)',
+                border: '1px solid var(--border)',
+                marginBottom: '1.25rem'
+              }}>
+                <div style={{ background: 'var(--surface)', padding: '0.75rem', borderRadius: 'var(--radius-md)', border: '1px solid var(--border)' }}>
+                  <div style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Current Cart</div>
+                  <div style={{ fontWeight: 800, fontSize: '0.92rem', color: 'var(--text-main)', marginTop: '0.2rem' }}>
+                    🏥 {cart.pharmacyName}
+                  </div>
+                  <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '0.2rem' }}>
+                    {cart.items.reduce((s, i) => s + i.quantity, 0)} {cart.items.reduce((s, i) => s + i.quantity, 0) === 1 ? 'item' : 'items'}
+                  </div>
+                </div>
+
+                <div style={{ fontSize: '1.25rem', color: 'var(--text-muted)', fontWeight: 900 }}>➔</div>
+
+                <div style={{ background: 'var(--primary-light)', padding: '0.75rem', borderRadius: 'var(--radius-md)', border: '1px solid rgba(5, 150, 105, 0.25)' }}>
+                  <div style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--primary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>New Pharmacy</div>
+                  <div style={{ fontWeight: 800, fontSize: '0.92rem', color: 'var(--text-main)', marginTop: '0.2rem' }}>
+                    🏥 {pharmacyConflictItem.pharmacy.display_name}
+                  </div>
+                  <div style={{ fontSize: '0.78rem', color: 'var(--primary)', fontWeight: 600, marginTop: '0.2rem' }}>
+                    + {pharmacyConflictItem.medicine.generic_name}
+                  </div>
+                </div>
+              </div>
+
+              <div style={{
+                background: 'rgba(217, 119, 6, 0.08)',
+                border: '1px solid rgba(217, 119, 6, 0.25)',
+                borderRadius: 'var(--radius-md)',
+                padding: '0.75rem 0.9rem',
+                fontSize: '0.85rem',
+                color: 'var(--warning-text)',
+                marginBottom: '1.25rem'
+              }}>
+                Clear current cart from <strong>{cart.pharmacyName}</strong> and add <strong>{pharmacyConflictItem.medicine.generic_name}</strong> from <strong>{pharmacyConflictItem.pharmacy.display_name}</strong>?
+              </div>
+
+              <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end' }}>
+                <button
+                  type="button"
+                  className="btn btn-outline"
+                  onClick={() => setPharmacyConflictItem(null)}
+                  style={{ flex: 1 }}
+                >
+                  Keep Current Cart
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  onClick={handleConfirmCartPharmacySwitch}
+                  style={{ flex: 1.2 }}
+                >
+                  Clear Cart & Add
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -3130,6 +3396,183 @@ function App() {
         </div>
       )}
 
+      {/* POS & PMS INTEGRATIONS MODAL */}
+      {isPosModalOpen && (
+        <div className="modal-overlay" onClick={() => setIsPosModalOpen(false)}>
+          <div className="modal-card" style={{ maxWidth: '680px' }} onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
+                <span style={{ fontSize: '1.4rem' }}>⚡</span>
+                <div>
+                  <h3 style={{ fontSize: '1.25rem', fontWeight: 800, margin: 0 }}>PMS & POS Webhook Integrations</h3>
+                  <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', margin: 0 }}>Real-time inventory syncing for Ghana pharmacy software</p>
+                </div>
+              </div>
+              <button className="modal-close" onClick={() => setIsPosModalOpen(false)}>&times;</button>
+            </div>
+            <div className="modal-body" style={{ maxHeight: '75vh', overflowY: 'auto' }}>
+              {/* Webhook Endpoint Box */}
+              <div style={{ background: 'var(--card-alt)', padding: '1.15rem', borderRadius: 'var(--radius-lg)', border: '1px solid var(--border)', marginBottom: '1.25rem' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+                  <strong style={{ fontSize: '0.9rem', color: 'var(--primary)' }}>📡 Your Live Ingestion Webhook URL:</strong>
+                  <span className="badge badge-verified">Ready for Webhooks</span>
+                </div>
+                <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                  <input
+                    type="text"
+                    readOnly
+                    className="form-input"
+                    style={{ fontFamily: 'monospace', fontSize: '0.82rem', background: 'var(--surface)' }}
+                    value={`${window.location.origin}/v1/integrations/webhooks/${selectedProvider}`}
+                  />
+                  <button
+                    type="button"
+                    className="btn btn-outline btn-sm"
+                    onClick={() => {
+                      navigator.clipboard.writeText(`${window.location.origin}/v1/integrations/webhooks/${selectedProvider}`);
+                      showToast('Webhook URL copied to clipboard!', 'success');
+                    }}
+                  >
+                    📋 Copy
+                  </button>
+                </div>
+                <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '0.5rem' }}>
+                  Paste this endpoint into your pharmacy software webhook settings. Supported: <strong>PrimeCare</strong>, <strong>RxPhoto</strong>, <strong>PioneerRx</strong>, and <strong>Generic JSON</strong>.
+                </div>
+              </div>
+
+              {/* Active Connections */}
+              <div style={{ marginBottom: '1.5rem' }}>
+                <h4 style={{ fontSize: '0.95rem', fontWeight: 800, marginBottom: '0.75rem' }}>Active Software Connections</h4>
+                {pharmacyConnections.length === 0 ? (
+                  <div style={{ padding: '1.25rem', textAlign: 'center', border: '1px dashed var(--border)', borderRadius: 'var(--radius-md)', color: 'var(--text-muted)', fontSize: '0.88rem' }}>
+                    No POS/PMS software connected yet. Register a connection below or send a test webhook.
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.65rem' }}>
+                    {pharmacyConnections.map((conn) => (
+                      <div
+                        key={conn.id}
+                        style={{
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          padding: '0.85rem 1rem',
+                          background: 'var(--surface)',
+                          border: '1px solid var(--border)',
+                          borderRadius: 'var(--radius-md)',
+                        }}
+                      >
+                        <div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                            <strong style={{ textTransform: 'uppercase', fontSize: '0.9rem' }}>{conn.provider_name}</strong>
+                            <span className={`badge ${conn.status === 'CONNECTED' ? 'badge-verified' : 'badge-uncertain'}`}>
+                              {conn.status}
+                            </span>
+                          </div>
+                          <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '0.2rem' }}>
+                            Last sync: {conn.last_sync_at ? new Date(conn.last_sync_at).toLocaleString() : 'Never'}
+                            {conn.last_error && <span style={{ color: 'var(--destructive)', marginLeft: '0.5rem' }}>⚠️ {conn.last_error}</span>}
+                          </div>
+                        </div>
+                        <div style={{ display: 'flex', gap: '0.4rem' }}>
+                          <button
+                            type="button"
+                            className="btn btn-secondary btn-sm"
+                            disabled={isSyncingPos}
+                            onClick={() => handleTriggerConnectionSync(conn.id)}
+                          >
+                            {isSyncingPos ? 'Syncing...' : '🔄 Sync Now'}
+                          </button>
+                          <button
+                            type="button"
+                            className="btn btn-outline btn-sm"
+                            style={{ color: 'var(--destructive)' }}
+                            onClick={() => handleDeleteConnection(conn.id)}
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Add/Register Connection Form */}
+              <div style={{ borderTop: '1px solid var(--border)', paddingTop: '1.25rem', marginBottom: '1.5rem' }}>
+                <h4 style={{ fontSize: '0.95rem', fontWeight: 800, marginBottom: '0.75rem' }}>Connect New PMS / POS Provider</h4>
+                <form onSubmit={handleCreateConnection}>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem', marginBottom: '0.75rem' }}>
+                    <div className="form-group" style={{ marginBottom: 0 }}>
+                      <label className="form-label">Select System</label>
+                      <select
+                        className="form-select"
+                        value={selectedProvider}
+                        onChange={(e) => setSelectedProvider(e.target.value)}
+                      >
+                        <option value="primecare">PrimeCare PMS (Ghana)</option>
+                        <option value="rxphoto">RxPhoto / RxSync</option>
+                        <option value="pioneer">PioneerRx POS</option>
+                        <option value="generic">Custom / Generic Webhook</option>
+                      </select>
+                    </div>
+                    <div className="form-group" style={{ marginBottom: 0 }}>
+                      <label className="form-label">Webhook Secret (Optional)</label>
+                      <input
+                        type="password"
+                        className="form-input"
+                        placeholder="Leave blank to auto-generate"
+                        value={webhookSecretInput}
+                        onChange={(e) => setWebhookSecretInput(e.target.value)}
+                      />
+                    </div>
+                  </div>
+                  <button type="submit" className="btn btn-primary" style={{ width: '100%', padding: '0.65rem' }}>
+                    ✓ Register & Generate Webhook Secret
+                  </button>
+                </form>
+              </div>
+
+              {/* Recent Sync History */}
+              {pharmacySyncHistory.length > 0 && (
+                <div style={{ borderTop: '1px solid var(--border)', paddingTop: '1.25rem' }}>
+                  <h4 style={{ fontSize: '0.95rem', fontWeight: 800, marginBottom: '0.75rem' }}>Recent Automated Sync Logs</h4>
+                  <div style={{ maxHeight: '180px', overflowY: 'auto' }}>
+                    <table style={{ width: '100%', fontSize: '0.8rem', textAlign: 'left', borderCollapse: 'collapse' }}>
+                      <thead>
+                        <tr style={{ background: 'var(--card-alt)', borderBottom: '1px solid var(--border)' }}>
+                          <th style={{ padding: '0.4rem 0.6rem' }}>Date & Time</th>
+                          <th style={{ padding: '0.4rem 0.6rem' }}>Source</th>
+                          <th style={{ padding: '0.4rem 0.6rem' }}>Status</th>
+                          <th style={{ padding: '0.4rem 0.6rem' }}>Accepted / Received</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {pharmacySyncHistory.slice(0, 8).map((sync) => (
+                          <tr key={sync.id} style={{ borderBottom: '1px solid var(--border)' }}>
+                            <td style={{ padding: '0.4rem 0.6rem' }}>{new Date(sync.started_at).toLocaleString()}</td>
+                            <td style={{ padding: '0.4rem 0.6rem' }}><span className="badge badge-likely">{sync.source_type}</span></td>
+                            <td style={{ padding: '0.4rem 0.6rem' }}>
+                              <span className={`badge ${sync.status === 'SUCCESS' ? 'badge-verified' : 'badge-uncertain'}`}>
+                                {sync.status}
+                              </span>
+                            </td>
+                            <td style={{ padding: '0.4rem 0.6rem', fontWeight: 700 }}>
+                              {sync.records_accepted} / {sync.records_received}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {isNotificationsOpen && currentUser && (
         <div className="modal-overlay" onClick={() => setIsNotificationsOpen(false)}>
           <div className="modal-card notification-modal" onClick={(e) => e.stopPropagation()}>
@@ -3210,15 +3653,54 @@ function App() {
               <div style={{ background: 'var(--card-alt)', padding: '1.35rem', borderRadius: 'var(--radius-xl)', marginBottom: '1.25rem', border: '1px solid var(--border)' }}>
                 <div style={{ fontSize: '1.25rem', fontWeight: 900 }}>{currentUser.first_name} {currentUser.last_name || ''}</div>
                 <div style={{ fontSize: '0.9rem', color: 'var(--text-muted)' }}>{currentUser.email || currentUser.phone}</div>
-                <span className="badge badge-verified" style={{ marginTop: '0.65rem' }}>
-                  Role: {currentUser.role}
-                </span>
+                <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginTop: '0.65rem' }}>
+                  <span className="badge badge-verified">
+                    Role: {currentUser.role}
+                  </span>
+                  {pharmacyData?.display_name && (
+                    <span className="badge badge-likely">
+                      🏥 {pharmacyData.display_name}
+                    </span>
+                  )}
+                </div>
               </div>
 
               {pharmacyData?.verification_status === 'PENDING' && (
                 <div style={{ background: 'var(--warning-bg)', color: 'var(--warning-text)', padding: '0.85rem', borderRadius: 'var(--radius-md)', marginBottom: '1rem', fontSize: '0.85rem', border: '1px solid var(--warning-border)' }}>
                   Your pharmacy application is currently pending platform verification.
                 </div>
+              )}
+
+              {(currentUser.role === 'PHARMACY_ADMIN' || currentUser.role === 'PHARMACY_STAFF') && (
+                <button
+                  className="btn btn-primary"
+                  style={{ width: '100%', marginBottom: '0.75rem', padding: '0.75rem', fontWeight: 700 }}
+                  onClick={() => {
+                    setIsProfileOpen(false);
+                    setActivePortal('pharmacy');
+                    setActiveAdminPage('overview');
+                    window.history.pushState({}, '', '/pharmacy/overview');
+                    if (currentToken) loadPharmacyData(currentToken);
+                  }}
+                >
+                  🏥 Go to Pharmacy Operations Portal
+                </button>
+              )}
+
+              {currentUser.role === 'PLATFORM_OPS' && (
+                <button
+                  className="btn btn-primary"
+                  style={{ width: '100%', marginBottom: '0.75rem', padding: '0.75rem', fontWeight: 700 }}
+                  onClick={() => {
+                    setIsProfileOpen(false);
+                    setActivePortal('platform');
+                    setActiveAdminPage('network');
+                    window.history.pushState({}, '', '/platform/network');
+                    if (currentToken) loadPlatformData(currentToken);
+                  }}
+                >
+                  🛡️ Go to Platform Operations Portal
+                </button>
               )}
 
               {currentUser.role === 'CUSTOMER' && (

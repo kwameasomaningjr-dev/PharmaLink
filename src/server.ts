@@ -1,6 +1,7 @@
 import { createApp } from './app.js';
 import { seedDatabase } from './database/seed.js';
 import { assertSecurityConfiguration } from './common/middleware.js';
+import { IntegrationCronService } from './modules/integration/cron.service.js';
 import dotenv from 'dotenv';
 
 dotenv.config();
@@ -17,6 +18,9 @@ async function startServer() {
     const server = app.listen(PORT, () => {
       console.log(`[Server] PharmaLink API running on http://localhost:${PORT}/v1`);
       console.log(`[Server] Health check: http://localhost:${PORT}/health`);
+      if (process.env.NODE_ENV !== 'test') {
+        IntegrationCronService.start();
+      }
     });
 
     server.on('error', (err: any) => {

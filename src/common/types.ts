@@ -13,8 +13,8 @@ export type InventorySourceType = 'POS' | 'FILE' | 'MANUAL' | 'PHYSICAL_CONFIRMA
 export type AvailabilityState = 'VERIFIED' | 'LIKELY' | 'UNCERTAIN' | 'UNAVAILABLE';
 export type InventoryStatus = 'ACTIVE' | 'DISABLED';
 
-export type SyncSourceType = 'API' | 'FILE' | 'MANUAL';
-export type SyncStatus = 'STARTED' | 'SUCCESS' | 'PARTIAL' | 'FAILED';
+export type SyncSourceType = 'API' | 'FILE' | 'MANUAL' | 'POS_API';
+export type SyncStatus = 'STARTED' | 'SUCCESS' | 'PARTIAL' | 'FAILED' | 'SKIPPED';
 
 export type OrderStatus =
   | 'DRAFT'

@@ -24,11 +24,12 @@ export class AuditService {
     } = params;
 
     const id = uuidv4();
+    const finalEntityId = entityId || id;
     try {
       await client.query(
         `INSERT INTO audit_events (id, actor_user_id, pharmacy_id, event_type, entity_type, entity_id, metadata)
          VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-        [id, actorUserId, pharmacyId, eventType, entityType, entityId, JSON.stringify(metadata)]
+        [id, actorUserId, pharmacyId, eventType, entityType, finalEntityId, JSON.stringify(metadata)]
       );
     } catch (err) {
       // Never let audit log failure break the primary transaction silently, but log loudly
