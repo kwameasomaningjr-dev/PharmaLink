@@ -1527,6 +1527,7 @@ function App() {
   };
 
   // Paystack Online Payment Trigger (MTN MoMo, Telecel Cash, AT Money, Debit Card)
+  // Paystack Online Payment Trigger (MTN MoMo, Telecel Cash, AT Money, Debit Card)
   const handlePayWithPaystack = async (order) => {
     if (!currentToken) {
       setIsLoginOpen(true);
@@ -1557,45 +1558,69 @@ function App() {
       const payment = data.data;
       const paystackPubKey = 'pk_test_6567afd684881d60818b564d5e55108cf2276dc7';
 
-      // Check if PaystackPop inline SDK is available in browser
-      if (typeof window !== 'undefined' && window.PaystackPop && typeof window.PaystackPop.setup === 'function') {
-        const handler = window.PaystackPop.setup({
-          key: paystackPubKey,
-          email: currentUser?.email || 'customer@pharmalink.gh',
-          amount: amountMinor,
-          currency: 'GHS',
-          channels: ['mobile_money', 'card'],
-          ref: payment.provider_reference || `PL_PAY_${Date.now()}`,
-          callback: async (response) => {
-            showToast('Payment received! Verifying with network...', 'success');
-            try {
-              const verifyRes = await fetch('/v1/payments/verify', {
-                method: 'POST',
-                headers: {
-                  'Content-Type': 'application/json',
-                  'Authorization': `Bearer ${currentToken}`,
-                },
-                body: JSON.stringify({ reference: response.reference || payment.provider_reference }),
-              });
-              const verifyData = await verifyRes.json();
-              if (verifyRes.ok && verifyData.data?.status === 'SUCCESS') {
-                showToast(`Payment of GHS ${(amountMinor / 100).toFixed(2)} verified successfully!`, 'success');
-              }
-            } catch (vErr) {
-              console.warn('Payment verify warning:', vErr);
+      const verifyPaymentRef = function(ref) {
+        showToast('Verifying payment with network...', 'info');
+        fetch('/v1/payments/verify', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${currentToken}`,
+          },
+          body: JSON.stringify({ reference: ref || payment.provider_reference }),
+        })
+          .then(function(r) { return r.json(); })
+          .then(function(vData) {
+            if (vData.data?.status === 'SUCCESS') {
+              showToast(`Payment of GHS ${(amountMinor / 100).toFixed(2)} verified successfully!`, 'success');
             }
-            await fetchMyOrders();
-          },
-          onClose: () => {
-            showToast('Payment window closed.', 'info');
             fetchMyOrders();
-          },
-        });
-        handler.openIframe();
-      } else if (payment.authorization_url) {
-        window.open(payment.authorization_url, '_blank');
-        showToast('Paystack checkout opened in a new tab.', 'info');
-      } else {
+          })
+          .catch(function(err) {
+            console.warn('Payment verify warning:', err);
+            fetchMyOrders();
+          });
+      };
+
+      // If window.PaystackPop is available, open popup
+      let popupOpened = false;
+      if (typeof window !== 'undefined' && window.PaystackPop && typeof window.PaystackPop.setup === 'function') {
+        try {
+          const handler = window.PaystackPop.setup({
+            key: paystackPubKey,
+            email: currentUser?.email || 'customer@pharmalink.gh',
+            amount: amountMinor,
+            currency: 'GHS',
+            channels: ['mobile_money', 'card'],
+            ref: payment.provider_reference || `PL_PAY_${Date.now()}`,
+            callback: function(response) {
+              showToast('Payment received! Verifying...', 'success');
+              verifyPaymentRef(response && response.reference ? response.reference : payment.provider_reference);
+            },
+            onSuccess: function(response) {
+              showToast('Payment received! Verifying...', 'success');
+              verifyPaymentRef(response && response.reference ? response.reference : payment.provider_reference);
+            },
+            onClose: function() {
+              showToast('Payment window closed.', 'info');
+              fetchMyOrders();
+            },
+            onCancel: function() {
+              showToast('Payment window closed.', 'info');
+              fetchMyOrders();
+            },
+          });
+          if (handler && typeof handler.openIframe === 'function') {
+            handler.openIframe();
+            popupOpened = true;
+          }
+        } catch (popupErr) {
+          console.warn('PaystackPop inline error, redirecting to authorization_url:', popupErr);
+        }
+      }
+
+      if (!popupOpened && payment.authorization_url) {
+        window.location.href = payment.authorization_url;
+      } else if (!popupOpened) {
         showToast('Payment session created. Reference: ' + (payment.provider_reference || payment.id), 'success');
         fetchMyOrders();
       }
