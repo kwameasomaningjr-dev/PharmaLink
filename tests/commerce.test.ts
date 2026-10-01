@@ -212,4 +212,57 @@ describe('owned commerce and integration contracts', () => {
     expect(audit.status).toBe(200);
     expect(audit.body.data.some((event: any) => event.event_type === 'PHARMACY_VERIFICATION_UPDATED')).toBe(true);
   });
+
+  it('automatically processes a refund reversal when a paid order is rejected by the pharmacy', async () => {
+    // 1. Customer creates an order
+    const orderRes = await request(app).post('/v1/orders')
+      .set('Authorization', `Bearer ${customerToken}`)
+      .send({
+        pharmacy_id: 'e1111111-1111-1111-1111-111111111111',
+        fulfillment_type: 'PICKUP',
+        items: [{ medicine_id: 'a1111111-1111-1111-1111-111111111111', quantity: 2 }],
+      });
+    expect(orderRes.status).toBe(201);
+    const paidOrderId = orderRes.body.data.id;
+
+    // 2. Customer pays online (simulated successful payment)
+    const paymentRes = await request(app)
+      .post(`/v1/payments/orders/${paidOrderId}/payments`)
+      .set('Authorization', `Bearer ${customerToken}`)
+      .set('Idempotency-Key', `pay-reject-test-${Date.now()}`);
+    expect(paymentRes.status).toBe(201);
+    const paymentId = paymentRes.body.data.id;
+
+    // Mark payment SUCCESS
+    await db.query(`UPDATE payments SET status = 'SUCCESS' WHERE id = $1`, [paymentId]);
+
+    // 3. Pharmacy staff logs in and rejects the order
+    const pharmLogin = await request(app).post('/v1/auth/login').send({
+      identifier: 'admin@eastlegonrx.gh',
+      password: 'Password123!',
+    });
+    expect(pharmLogin.status).toBe(200);
+    const pharmToken = pharmLogin.body.data.token;
+
+    const rejectRes = await request(app)
+      .post(`/v1/pharmacy/orders/${paidOrderId}/reject`)
+      .set('Authorization', `Bearer ${pharmToken}`)
+      .send({ rejection_reason: 'Out of physical stock' });
+
+    expect(rejectRes.status).toBe(200);
+    expect(rejectRes.body.data.status).toBe('REJECTED');
+
+    // 4. Verify payment status was automatically transitioned to REFUNDED
+    const paymentCheck = await db.query(`SELECT status FROM payments WHERE id = $1`, [paymentId]);
+    expect(paymentCheck.rows[0].status).toBe('REFUNDED');
+
+    // 5. Verify customer order list returns REFUNDED payment status
+    const customerOrders = await request(app)
+      .get('/v1/orders')
+      .set('Authorization', `Bearer ${customerToken}`);
+    const foundOrder = customerOrders.body.data.find((o: any) => o.id === paidOrderId);
+    expect(foundOrder).toBeDefined();
+    expect(foundOrder.status).toBe('REJECTED');
+    expect(foundOrder.payment_status).toBe('REFUNDED');
+  });
 });

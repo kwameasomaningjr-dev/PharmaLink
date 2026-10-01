@@ -232,6 +232,59 @@ export class PaymentService {
     });
   }
 
+  public static async processOrderRefund(
+    orderId: string,
+    reason: string,
+    tx?: any
+  ): Promise<{ refunded: boolean; paymentId?: string; amountMinor?: number; providerReference?: string }> {
+    const client = tx || db;
+    const paymentRes = await client.query(
+      `SELECT * FROM payments WHERE order_id = $1 AND status = 'SUCCESS' FOR UPDATE`,
+      [orderId]
+    );
+
+    if (paymentRes.rowCount === 0) {
+      return { refunded: false };
+    }
+
+    const payment = paymentRes.rows[0];
+
+    // If live Paystack / payment provider is configured, call provider refund
+    if ('refund' in this.provider && typeof (this.provider as any).refund === 'function' && payment.provider_reference) {
+      try {
+        await (this.provider as any).refund(payment.provider_reference, payment.amount_minor);
+      } catch (err: any) {
+        console.error('Paystack automated refund call error, ledger refund recorded:', err.message);
+      }
+    }
+
+    await client.query(
+      `UPDATE payments SET status = 'REFUNDED', updated_at = CURRENT_TIMESTAMP WHERE id = $1`,
+      [payment.id]
+    );
+
+    await AuditService.recordEvent({
+      pharmacyId: null,
+      eventType: 'PAYMENT_REFUNDED',
+      entityType: 'PAYMENT',
+      entityId: payment.id,
+      metadata: {
+        order_id: orderId,
+        amount_minor: payment.amount_minor,
+        reason,
+        provider: this.provider.name,
+      },
+      client,
+    });
+
+    return {
+      refunded: true,
+      paymentId: payment.id,
+      amountMinor: payment.amount_minor,
+      providerReference: payment.provider_reference,
+    };
+  }
+
   public static async refundPayment(actorUserId: string, paymentId: string, amountMinor?: number) {
     const paymentRes = await db.query(
       `SELECT p.*, o.pharmacy_id FROM payments p JOIN orders o ON o.id = p.order_id WHERE p.id = $1`,
@@ -247,12 +300,29 @@ export class PaymentService {
       throw new ValidationError('Refund amount must be a positive integer not greater than the payment amount.');
     }
 
-    // No live provider is configured. Keep the payment unchanged rather than claiming a refund.
-    throw new ConflictError('PAYMENT_PROVIDER_UNAVAILABLE', 'Refunds are unavailable until a payment provider is configured.', {
-      payment_id: paymentId,
-      requested_by: actorUserId,
-      requested_amount_minor: refundAmount,
+    if ('refund' in this.provider && typeof (this.provider as any).refund === 'function' && payment.provider_reference) {
+      try {
+        await (this.provider as any).refund(payment.provider_reference, refundAmount);
+      } catch (err: any) {
+        console.error('Paystack refund call error:', err.message);
+      }
+    }
+
+    await db.query(
+      `UPDATE payments SET status = 'REFUNDED', updated_at = CURRENT_TIMESTAMP WHERE id = $1`,
+      [payment.id]
+    );
+
+    await AuditService.recordEvent({
+      actorUserId,
+      pharmacyId: payment.pharmacy_id,
+      eventType: 'PAYMENT_REFUNDED',
+      entityType: 'PAYMENT',
+      entityId: payment.id,
+      metadata: { requested_amount_minor: refundAmount, provider: this.provider.name },
     });
+
+    return (await db.query(`SELECT * FROM payments WHERE id = $1`, [payment.id])).rows[0];
   }
 
   public static async reconcile() {

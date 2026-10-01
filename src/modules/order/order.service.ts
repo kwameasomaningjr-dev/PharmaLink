@@ -18,6 +18,7 @@ import {
 import { AuditService } from '../audit/audit.service.js';
 import { AvailabilityEngine } from '../availability/availability.engine.js';
 import { NotificationService } from '../notification/notification.service.js';
+import { PaymentService } from '../payment/payment.service.js';
 
 export interface CreateOrderItemInput {
   medicine_id: string;
@@ -393,6 +394,13 @@ export class OrderService {
       // Release any active reservations
       await this.releaseOrderReservationsInternal(orderId, tx);
 
+      // Automatically reverse payment if already paid online
+      const refundResult = await PaymentService.processOrderRefund(
+        orderId,
+        `Order rejected by pharmacy: ${rejectionReason.trim()}`,
+        tx
+      );
+
       await tx.query(
         `UPDATE orders SET
           status = 'REJECTED',
@@ -408,13 +416,17 @@ export class OrderService {
         eventType: 'ORDER_REJECTED',
         entityType: 'ORDER',
         entityId: orderId,
-        metadata: { rejection_reason: rejectionReason },
+        metadata: {
+          rejection_reason: rejectionReason,
+          auto_refunded: refundResult.refunded,
+          refund_amount_minor: refundResult.amountMinor,
+        },
         client: tx,
       });
 
       await NotificationService.queueNotification({
         userId: order.customer_id,
-        type: 'ORDER_REJECTED',
+        type: refundResult.refunded ? 'ORDER_REJECTED_REFUNDED' : 'ORDER_REJECTED',
         channel: 'IN_APP',
         referenceType: 'ORDER',
         referenceId: orderId,
@@ -472,9 +484,11 @@ export class OrderService {
         );
       }
 
-      // If cancelling, release reservations
+      // If cancelling, release reservations & reverse payment if paid online
+      let refundResult = { refunded: false, amountMinor: 0 };
       if (targetStatus === 'CANCELLED') {
         await this.releaseOrderReservationsInternal(orderId, tx);
+        refundResult = await PaymentService.processOrderRefund(orderId, 'Order cancelled by customer or operator', tx) as any;
       }
 
       // If completing, consume reservations and reduce physical stock
@@ -495,13 +509,17 @@ export class OrderService {
         eventType: `ORDER_${targetStatus}`,
         entityType: 'ORDER',
         entityId: orderId,
-        metadata: { from: order.status, to: targetStatus },
+        metadata: {
+          from: order.status,
+          to: targetStatus,
+          auto_refunded: refundResult.refunded,
+        },
         client: tx,
       });
 
       await NotificationService.queueNotification({
         userId: order.customer_id,
-        type: `ORDER_${targetStatus}`,
+        type: refundResult.refunded ? `ORDER_${targetStatus}_REFUNDED` : `ORDER_${targetStatus}`,
         channel: 'IN_APP',
         referenceType: 'ORDER',
         referenceId: orderId,

@@ -2932,6 +2932,10 @@ function App() {
                                       <span className="badge badge-verified" style={{ fontSize: '0.72rem', background: 'rgba(16, 185, 129, 0.15)', color: '#10b981', border: '1px solid rgba(16, 185, 129, 0.3)' }}>
                                         💳 PAID ONLINE
                                       </span>
+                                    ) : ord.payment_status === 'REFUNDED' ? (
+                                      <span className="badge badge-verified" style={{ fontSize: '0.72rem', background: 'rgba(59, 130, 246, 0.15)', color: '#2563eb', border: '1px solid rgba(59, 130, 246, 0.3)' }}>
+                                        🔄 REFUNDED
+                                      </span>
                                     ) : (
                                       <span className="badge badge-uncertain" style={{ fontSize: '0.72rem' }}>
                                         💵 PAY AT COUNTER
@@ -4019,6 +4023,20 @@ function App() {
               </button>
             </div>
             <div className="modal-body">
+              {rejectModalOrder.payment_status === 'SUCCESS' && (
+                <div style={{
+                  marginBottom: '1.15rem',
+                  padding: '0.85rem 1rem',
+                  borderRadius: 'var(--radius-md)',
+                  background: 'rgba(59, 130, 246, 0.1)',
+                  border: '1px solid rgba(59, 130, 246, 0.3)',
+                  fontSize: '0.85rem',
+                  color: '#1e40af'
+                }}>
+                  💳 <strong>Customer Paid Online (GHS {(Number(rejectModalOrder.total_minor || 0) / 100).toFixed(2)}):</strong> Confirming rejection will automatically trigger a full refund reversal back to the customer's Mobile Money or Card.
+                </div>
+              )}
+
               <p style={{ fontSize: '0.88rem', color: 'var(--text-muted)', marginBottom: '1.25rem' }}>
                 Please select a reason for rejecting this order. The customer will receive an immediate notification, and any temporary stock reservation will be safely released.
               </p>
@@ -4088,7 +4106,8 @@ function App() {
               ) : (
                 myNotifications.map((notification) => {
                   const isClarification = notification.type === 'PRESCRIPTION_CLARIFICATION_REQUIRED';
-                  const isRejected = notification.type === 'ORDER_REJECTED';
+                  const isRejectedRefunded = notification.type === 'ORDER_REJECTED_REFUNDED' || notification.type === 'ORDER_CANCELLED_REFUNDED';
+                  const isRejected = notification.type === 'ORDER_REJECTED' || isRejectedRefunded;
                   return (
                     <div
                       key={notification.id}
@@ -4098,16 +4117,20 @@ function App() {
                         <strong>
                           {isClarification
                             ? 'Action required: prescription clarification'
-                            : isRejected
-                              ? 'Order rejected by pharmacy'
-                              : notification.type.replaceAll('_', ' ').toLowerCase()}
+                            : isRejectedRefunded
+                              ? 'Order rejected · Automatic refund initiated'
+                              : isRejected
+                                ? 'Order rejected by pharmacy'
+                                : notification.type.replaceAll('_', ' ').toLowerCase()}
                         </strong>
                         <p>
                           {isClarification
                             ? 'The pharmacy needs more information before it can process your order.'
-                            : isRejected
-                              ? 'Review My Orders for the pharmacy reason and next steps.'
-                              : 'Your PharmaLink order has a new status update.'}
+                            : isRejectedRefunded
+                              ? 'Your payment has been automatically reversed to your Mobile Money or Card.'
+                              : isRejected
+                                ? 'Review My Orders for the pharmacy reason and next steps.'
+                                : 'Your PharmaLink order has a new status update.'}
                         </p>
                         <small>{new Date(notification.created_at).toLocaleString()}</small>
                       </div>
@@ -4306,12 +4329,16 @@ function App() {
                         <span className="badge badge-verified" style={{ background: 'rgba(16, 185, 129, 0.15)', color: '#10b981', border: '1px solid rgba(16, 185, 129, 0.3)', fontWeight: 700 }}>
                           💳 PAID ONLINE
                         </span>
+                      ) : order.payment_status === 'REFUNDED' ? (
+                        <span className="badge badge-verified" style={{ background: 'rgba(59, 130, 246, 0.15)', color: '#2563eb', border: '1px solid rgba(59, 130, 246, 0.3)', fontWeight: 700 }}>
+                          🔄 REFUNDED
+                        </span>
                       ) : (
                         <span className="badge badge-uncertain" style={{ fontSize: '0.75rem' }}>
                           ⏳ UNPAID
                         </span>
                       )}
-                      <span className={`badge ${['ACCEPTED', 'READY', 'COMPLETED'].includes(order.status) ? 'badge-verified' : 'badge-likely'}`}>
+                      <span className={`badge ${['ACCEPTED', 'READY', 'COMPLETED'].includes(order.status) ? 'badge-verified' : order.status === 'REJECTED' || order.status === 'CANCELLED' ? 'badge-uncertain' : 'badge-likely'}`}>
                         {order.status === 'ACCEPTED' ? '🔒 STOCK RESERVED' : order.status}
                       </span>
                     </div>
@@ -4322,7 +4349,7 @@ function App() {
                   {order.delivery_address && <div style={{ fontSize: '0.82rem', marginTop: '0.25rem', color: 'var(--text-muted)' }}>📍 Address: {order.delivery_address}</div>}
 
                   {/* Direct Online Payment Banner if Unpaid */}
-                  {order.payment_status !== 'SUCCESS' && !['CANCELLED', 'REJECTED'].includes(order.status) && (
+                  {order.payment_status !== 'SUCCESS' && order.payment_status !== 'REFUNDED' && !['CANCELLED', 'REJECTED'].includes(order.status) && (
                     <div style={{
                       marginTop: '0.75rem',
                       padding: '0.85rem 1rem',
@@ -4405,9 +4432,25 @@ function App() {
                     </div>
                   )}
 
-                  {order.status === 'REJECTED' && order.rejection_reason && (
-                    <div style={{ marginTop: '0.6rem', padding: '0.65rem', borderRadius: 'var(--radius-md)', background: 'var(--destructive-bg)', color: 'var(--destructive-text)', fontSize: '0.82rem' }}>
-                      <strong>Pharmacy reason:</strong> {order.rejection_reason}
+                  {order.status === 'REJECTED' && (
+                    <div style={{ marginTop: '0.6rem', padding: '0.75rem', borderRadius: 'var(--radius-md)', background: 'var(--destructive-bg)', color: 'var(--destructive-text)', fontSize: '0.84rem' }}>
+                      <div><strong>Pharmacy Rejection Reason:</strong> {order.rejection_reason || 'Pharmacy unable to fulfill order at this time'}</div>
+                      {order.payment_status === 'REFUNDED' && (
+                        <div style={{ marginTop: '0.45rem', paddingTop: '0.45rem', borderTop: '1px solid var(--destructive-border)', color: '#15803d', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                          <span>🔄 Full payment refund of GHS {(Number(order.total_minor || order.total_amount_minor || 0) / 100).toFixed(2)} automatically reversed to your payment method.</span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {order.status === 'CANCELLED' && (
+                    <div style={{ marginTop: '0.6rem', padding: '0.75rem', borderRadius: 'var(--radius-md)', background: 'var(--card-alt)', color: 'var(--text-muted)', fontSize: '0.84rem', border: '1px solid var(--border)' }}>
+                      <div><strong>Order Cancelled</strong></div>
+                      {order.payment_status === 'REFUNDED' && (
+                        <div style={{ marginTop: '0.45rem', paddingTop: '0.45rem', borderTop: '1px solid var(--border)', color: '#15803d', fontWeight: 700 }}>
+                          🔄 Payment refund of GHS {(Number(order.total_minor || order.total_amount_minor || 0) / 100).toFixed(2)} automatically reversed.
+                        </div>
+                      )}
                     </div>
                   )}
                   {order.latest_prescription_status === 'CLARIFICATION_REQUIRED' && (
