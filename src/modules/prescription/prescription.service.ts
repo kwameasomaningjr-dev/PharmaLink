@@ -18,13 +18,18 @@ const allowedFileTypes = new Map([
 ]);
 
 function uploadRoot(): string {
-  return path.resolve(process.env.UPLOAD_DIR || './uploads');
+  if (process.env.UPLOAD_DIR) return path.resolve(process.env.UPLOAD_DIR);
+  if (process.env.VERCEL || process.env.NODE_ENV === 'production' || process.env.AWS_LAMBDA_FUNCTION_NAME) {
+    return '/tmp/uploads';
+  }
+  return path.resolve('./uploads');
 }
 
 function hasExpectedSignature(buffer: Buffer, mimeType: string): boolean {
-  if (mimeType === 'application/pdf') return buffer.subarray(0, 5).toString() === '%PDF-';
-  if (mimeType === 'image/jpeg') return buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff;
-  if (mimeType === 'image/png') return buffer.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+  if (!buffer || buffer.length < 4) return false;
+  if (mimeType === 'application/pdf') return buffer.subarray(0, 5).toString().startsWith('%PDF-');
+  if (mimeType === 'image/jpeg') return buffer[0] === 0xff && buffer[1] === 0xd8;
+  if (mimeType === 'image/png') return buffer.subarray(0, 4).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47]));
   return false;
 }
 

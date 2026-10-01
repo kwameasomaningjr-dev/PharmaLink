@@ -361,27 +361,48 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
   align-items: flex-start;
   justify-content: space-between;
   gap: 1rem;
-  padding: 0.85rem;
-  margin-bottom: 0.7rem;
+  padding: 1rem 1.15rem;
+  margin-bottom: 0.75rem;
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
-  background: var(--surface);
+  background: var(--card);
+  color: var(--text-main);
+  transition: all var(--transition-fast);
+  box-shadow: var(--shadow-xs);
+}
+
+.notification-item strong {
+  color: var(--text-main);
+  font-size: 0.95rem;
+  font-weight: 700;
+  display: block;
+  margin-bottom: 0.25rem;
 }
 
 .notification-item.unread {
-  border-color: var(--ring);
-  background: var(--accent);
+  border-left: 4px solid var(--primary);
+  background: var(--card-alt);
+  border-color: rgba(16, 185, 129, 0.35);
+  box-shadow: 0 2px 8px rgba(16, 185, 129, 0.08);
+}
+
+.dark .notification-item.unread {
+  background: rgba(16, 185, 129, 0.06);
+  border-left-color: #10b981;
+  border-color: rgba(16, 185, 129, 0.25);
 }
 
 .notification-item p {
-  margin: 0.3rem 0;
-  color: var(--text-muted);
-  font-size: 0.84rem;
+  margin: 0.25rem 0 0.4rem 0;
+  color: var(--text-secondary);
+  font-size: 0.86rem;
+  line-height: 1.45;
 }
 
 .notification-item small {
   color: var(--text-muted);
-  font-size: 0.72rem;
+  font-size: 0.74rem;
+  font-weight: 600;
 }
 
 .brand-wrapper {
@@ -2418,22 +2439,49 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
   color: var(--text-main);
 }
 
-.form-input, .form-select, .form-textarea {
+.form-input, .form-select, .form-textarea, .search-input {
   width: 100%;
   padding: 0.7rem 0.95rem;
   font-family: inherit;
   font-size: 0.92rem;
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  background: var(--surface);
-  color: var(--text-main);
+  background-color: var(--surface) !important;
+  color: var(--text-main) !important;
   outline: none;
-  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast), background-color var(--transition-fast);
 }
 
-.form-input:focus, .form-select:focus, .form-textarea:focus {
-  border-color: var(--primary);
+.search-input {
+  background-color: var(--surface) !important;
+  color: var(--text-main) !important;
+  border: 1.5px solid var(--border);
+}
+
+.search-input::placeholder,
+.form-input::placeholder,
+.form-textarea::placeholder,
+.hero-search-input::placeholder {
+  color: var(--text-muted) !important;
+  opacity: 0.85;
+}
+
+.form-input:focus, .form-select:focus, .form-textarea:focus, .search-input:focus {
+  border-color: var(--primary) !important;
   box-shadow: 0 0 0 3px var(--primary-glow);
+}
+
+/* Ensure autofill never causes unreadable white-on-white or dark-on-dark text */
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus,
+input:-webkit-autofill:active,
+textarea:-webkit-autofill,
+select:-webkit-autofill {
+  -webkit-text-fill-color: var(--text-main) !important;
+  -webkit-box-shadow: 0 0 0px 1000px var(--surface) inset !important;
+  box-shadow: 0 0 0px 1000px var(--surface) inset !important;
+  transition: background-color 5000s ease-in-out 0s;
 }
 
 /* ==========================================================================
