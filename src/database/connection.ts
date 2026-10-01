@@ -30,8 +30,10 @@ class DatabaseConnection {
 
     const databaseUrl = process.env.DATABASE_URL;
     if (databaseUrl && databaseUrl.trim() !== '') {
+      const isLocal = databaseUrl.includes('localhost') || databaseUrl.includes('127.0.0.1');
       this.pgPool = new pg.Pool({
         connectionString: databaseUrl,
+        ssl: isLocal ? false : { rejectUnauthorized: false },
       });
       this.isPGlite = false;
       return this.pgPool;
