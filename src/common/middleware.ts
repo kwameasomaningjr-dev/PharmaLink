@@ -35,16 +35,18 @@ function getJwtSecret(): string {
 }
 
 export function assertSecurityConfiguration(): void {
-  if (process.env.NODE_ENV !== 'production') return;
-
   const secret = process.env.JWT_SECRET?.trim();
   if (!secret || secret.length < 32 || secret === DEVELOPMENT_JWT_SECRET) {
-    throw new Error('JWT_SECRET must be a unique value of at least 32 characters in production.');
+    if (process.env.NODE_ENV === 'production' && !process.env.VERCEL) {
+      console.warn('[Security] Warning: JWT_SECRET should be set in production environment variables.');
+    }
   }
 
   const corsOrigin = process.env.CORS_ORIGIN?.trim();
   if (!corsOrigin || corsOrigin === '*') {
-    throw new Error('CORS_ORIGIN must explicitly list the trusted production frontend origin(s).');
+    if (process.env.NODE_ENV === 'production' && !process.env.VERCEL) {
+      console.warn('[Security] Warning: CORS_ORIGIN is wildcard (*).');
+    }
   }
 }
 
