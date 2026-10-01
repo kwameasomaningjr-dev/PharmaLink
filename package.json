@@ -3,7 +3,6 @@
   "version": "1.0.0",
   "type": "module",
   "description": "Ghana-first digital pharmacy availability and ordering platform MVP",
-  "main": "dist/index.js",
   "scripts": {
     "dev": "tsx watch src/server.ts",
     "build": "npm run build:frontend && tsc",

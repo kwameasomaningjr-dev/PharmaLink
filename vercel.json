@@ -1,15 +1,16 @@
 {
+  "version": 2,
   "rewrites": [
     {
       "source": "/v1/:match*",
-      "destination": "/api"
+      "destination": "/api/index.ts"
     },
     {
       "source": "/health",
-      "destination": "/api"
+      "destination": "/api/index.ts"
     },
     {
-      "source": "/((?!api|public|.*\\..*).*)",
+      "source": "/((?!api|v1|health|.*\\..*).*)",
       "destination": "/index.html"
     }
   ]
