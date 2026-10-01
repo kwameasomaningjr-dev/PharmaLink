@@ -48,19 +48,29 @@ class DatabaseConnection {
       return this.pgPool;
     }
 
-    // Default to embedded PGlite for zero-friction local/dev environment
-    const dataDir = path.resolve(process.cwd(), 'data', 'pglite');
-    if (!fs.existsSync(dataDir)) {
-      fs.mkdirSync(dataDir, { recursive: true });
+    // Default to embedded PGlite for zero-friction local/dev/serverless environment
+    const isServerless = Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME || process.env.LAMBDA_TASK_ROOT);
+    const dataDir = isServerless
+      ? path.resolve('/tmp', 'pglite')
+      : path.resolve(process.cwd(), 'data', 'pglite');
+
+    try {
+      if (!fs.existsSync(dataDir)) {
+        fs.mkdirSync(dataDir, { recursive: true });
+      }
+    } catch {
+      // Ignore read-only filesystem errors in restricted environments
     }
 
     const initPGlite = async (dir?: string) => {
       if (dir) {
         // Remove stale postmaster lock/pid files that cause PGlite WASM aborts on unclean shutdown
-        const pidFile = path.join(dir, 'postmaster.pid');
-        if (fs.existsSync(pidFile)) {
-          try { fs.unlinkSync(pidFile); } catch {}
-        }
+        try {
+          const pidFile = path.join(dir, 'postmaster.pid');
+          if (fs.existsSync(pidFile)) {
+            fs.unlinkSync(pidFile);
+          }
+        } catch {}
       }
       const instance = dir ? new PGlite(dir) : new PGlite();
       await instance.waitReady;
@@ -70,14 +80,12 @@ class DatabaseConnection {
     try {
       this.pgliteInstance = await initPGlite(dataDir);
     } catch (err) {
-      console.warn('[Database] PGlite failed to initialize from disk, resetting data directory...', err);
+      console.warn('[Database] Persistent PGlite failed, falling back to in-memory mode:', err);
       try {
-        fs.rmSync(dataDir, { recursive: true, force: true });
-        fs.mkdirSync(dataDir, { recursive: true });
-        this.pgliteInstance = await initPGlite(dataDir);
-      } catch (fallbackErr) {
-        console.warn('[Database] Persistent PGlite failed, falling back to in-memory mode:', fallbackErr);
         this.pgliteInstance = await initPGlite();
+      } catch (inMemErr) {
+        console.error('[Database] In-memory PGlite failed:', inMemErr);
+        throw inMemErr;
       }
     }
 

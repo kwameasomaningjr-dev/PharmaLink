@@ -9,7 +9,7 @@
       "destination": "/api"
     },
     {
-      "source": "/((?!assets|uploads|app.js|index.html|styles.css|favicon.ico|manifest.json).*)",
+      "source": "/((?!api|public|.*\\..*).*)",
       "destination": "/index.html"
     }
   ]
