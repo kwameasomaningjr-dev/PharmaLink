@@ -1,4 +1,3 @@
-import { PGlite } from '@electric-sql/pglite';
 import pg from 'pg';
 import path from 'path';
 import fs from 'fs';
@@ -18,7 +17,7 @@ export interface TransactionClient extends DatabaseClient {
 
 class DatabaseConnection {
   private pgPool: pg.Pool | null = null;
-  private pgliteInstance: PGlite | null = null;
+  private pgliteInstance: any = null;
   private isPGlite = false;
 
   public async getClient(): Promise<DatabaseClient> {
@@ -29,6 +28,17 @@ class DatabaseConnection {
       return this.wrapPGlite(this.pgliteInstance);
     }
 
+    const databaseUrl = process.env.DATABASE_URL;
+    if (databaseUrl && databaseUrl.trim() !== '') {
+      this.pgPool = new pg.Pool({
+        connectionString: databaseUrl,
+      });
+      this.isPGlite = false;
+      return this.pgPool;
+    }
+
+    const { PGlite } = await import('@electric-sql/pglite');
+
     if (process.env.NODE_ENV === 'test') {
       if (!(globalThis as any).__PHARMALINK_PGLITE__) {
         (globalThis as any).__PHARMALINK_PGLITE__ = new PGlite();
@@ -37,15 +47,6 @@ class DatabaseConnection {
       this.pgliteInstance = (globalThis as any).__PHARMALINK_PGLITE__;
       this.isPGlite = true;
       return this.wrapPGlite(this.pgliteInstance!);
-    }
-
-    const databaseUrl = process.env.DATABASE_URL;
-    if (databaseUrl && databaseUrl.trim() !== '') {
-      this.pgPool = new pg.Pool({
-        connectionString: databaseUrl,
-      });
-      this.isPGlite = false;
-      return this.pgPool;
     }
 
     // Default to embedded PGlite for zero-friction local/dev/serverless environment
@@ -93,10 +94,10 @@ class DatabaseConnection {
     return this.wrapPGlite(this.pgliteInstance);
   }
 
-  public wrapPGlite(pglite: PGlite): DatabaseClient & { exec: (sql: string) => Promise<any> } {
+  public wrapPGlite(pglite: any): DatabaseClient & { exec: (sql: string) => Promise<any> } {
     return {
       query: async <T = any>(sql: string, params?: any[]): Promise<QueryResult<T>> => {
-        const res = await pglite.query<T>(sql, params || []);
+        const res = await pglite.query(sql, params || []);
         const rows = (res.rows as T[]) || [];
         return {
           rows,
@@ -151,10 +152,10 @@ class DatabaseConnection {
       await this.getClient();
     }
     const pglite = this.pgliteInstance!;
-    return await pglite.transaction(async (tx) => {
+    return await pglite.transaction(async (tx: any) => {
       const txClient: TransactionClient = {
         query: async <R = any>(sql: string, params?: any[]) => {
-          const res = await tx.query<R>(sql, params || []);
+          const res = await tx.query(sql, params || []);
           const rows = (res.rows as R[]) || [];
           return {
             rows,
@@ -182,7 +183,7 @@ class DatabaseConnection {
       await this.pgliteInstance.close();
       this.pgliteInstance = null;
     }
-    // In-memory PGlite for tests
+    const { PGlite } = await import('@electric-sql/pglite');
     this.pgliteInstance = new PGlite();
     await this.pgliteInstance.waitReady;
     this.isPGlite = true;

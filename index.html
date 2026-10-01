@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PharmaLink — Medicines delivered from your nearest pharmacy in Ghana</title>
+  
+  <!-- Google Fonts: Plus Jakarta Sans, Outfit, JetBrains Mono -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800;900&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+  <!-- Custom Stylesheet -->
+  <link rel="stylesheet" href="/app.css">
+
+  <style>
+    #app-status {
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 2rem;
+      color: var(--foreground);
+      background: var(--background);
+      font-family: var(--font-sans);
+      text-align: center;
+    }
+    .status-spinner {
+      width: 44px;
+      height: 44px;
+      border: 3px solid var(--border);
+      border-top-color: var(--primary);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      margin-bottom: 1rem;
+    }
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+  </style>
+  <script>
+    window.addEventListener('error', function (event) {
+      var status = document.getElementById('app-status');
+      if (!status || !event.message) return;
+      status.innerHTML = '<div style="font-size:32px;margin-bottom:12px;">⚠️</div><div style="font-weight:700;font-size:1.1rem;margin-bottom:8px;">PharmaLink could not load</div><div style="color:var(--destructive);font-size:0.9rem;max-width:480px;">' + event.message + '</div><button onclick="window.location.reload()" style="margin-top:16px;padding:8px 20px;background:var(--primary);color:var(--primary-foreground);border:none;border-radius:6px;cursor:pointer;font-weight:600;">Refresh</button>';
+    });
+  </script>
+
+  <!-- Self-contained application bundle (no CDN or in-browser Babel required) -->
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <!-- React Mount Root -->
+  <div id="root">
+    <div id="app-status" role="status">
+      <div class="status-spinner"></div>
+      <div style="font-weight: 600; font-size: 1.05rem;">Loading PharmaLink…</div>
+      <div style="font-size: 0.85rem; opacity: 0.7; margin-top: 4px;">Connecting to Ghana pharmacy network</div>
+    </div>
+  </div>
+</body>
+</html>

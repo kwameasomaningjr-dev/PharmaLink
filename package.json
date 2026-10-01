@@ -7,7 +7,7 @@
   "scripts": {
     "dev": "tsx watch src/server.ts",
     "build": "npm run build:frontend && tsc",
-    "build:frontend": "esbuild public/app.jsx --bundle --platform=browser --format=iife --target=es2020 --outfile=public/app.js",
+    "build:frontend": "esbuild public/app.jsx --bundle --platform=browser --format=iife --target=es2020 --outfile=public/app.js && node -e \"import('fs').then(fs => { fs.copyFileSync('public/app.js', 'app.js'); fs.copyFileSync('public/app.css', 'app.css'); })\"",
     "start": "node dist/server.js",
     "test": "vitest run",
     "test:watch": "vitest",
