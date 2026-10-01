@@ -1,3 +1,4 @@
+import fs from 'fs';
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
@@ -51,7 +52,9 @@ export function createApp() {
 
   // Static assets for Web App UI
   const publicDir = path.resolve(process.cwd(), 'public');
-  app.use(express.static(publicDir));
+  if (fs.existsSync(publicDir)) {
+    app.use(express.static(publicDir));
+  }
 
   // V1 API Router
   app.use('/v1', v1Router);
@@ -61,7 +64,27 @@ export function createApp() {
     if (req.path.startsWith('/v1')) {
       return next();
     }
-    res.sendFile(path.join(publicDir, 'index.html'));
+    const htmlPath = path.join(publicDir, 'index.html');
+    if (fs.existsSync(htmlPath)) {
+      return res.sendFile(htmlPath);
+    }
+    return res.type('html').send(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PharmaLink — Medicines delivered from your nearest pharmacy in Ghana</title>
+  <link rel="stylesheet" href="/app.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <div id="root">
+    <div style="min-height:100vh;display:flex;align-items:center;justify-content:center;font-family:sans-serif;">
+      <div>Loading PharmaLink…</div>
+    </div>
+  </div>
+</body>
+</html>`);
   });
 
   // Error handling middleware

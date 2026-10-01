@@ -12,14 +12,26 @@ function getApp() {
 }
 
 export default async function handler(req: any, res: any) {
-  if (!initPromise) {
-    initPromise = seedDatabase(false).catch((err) => {
-      console.warn('[Vercel Serverless] Database initialization warning:', err);
-    });
-  }
   try {
-    await initPromise;
-  } catch {}
-  const app = getApp();
-  return app(req, res);
+    if (!initPromise) {
+      initPromise = seedDatabase(false).catch((err) => {
+        console.warn('[Vercel Serverless] Database initialization warning:', err);
+      });
+    }
+    try {
+      await initPromise;
+    } catch {}
+    const app = getApp();
+    return app(req, res);
+  } catch (fatalErr: any) {
+    console.error('[Vercel Serverless] Fatal request error:', fatalErr);
+    if (!res.headersSent) {
+      res.status(500).json({
+        error: {
+          code: 'SERVERLESS_ERROR',
+          message: fatalErr.message || 'Internal Server Error',
+        },
+      });
+    }
+  }
 }
