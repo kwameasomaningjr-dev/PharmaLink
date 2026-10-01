@@ -32842,6 +32842,7 @@
     const [selectedProvider, setSelectedProvider] = (0, import_react21.useState)("primecare");
     const [webhookSecretInput, setWebhookSecretInput] = (0, import_react21.useState)("");
     const [isSyncingPos, setIsSyncingPos] = (0, import_react21.useState)(false);
+    const [isProcessingPayment, setIsProcessingPayment] = (0, import_react21.useState)(false);
     const [loginIdentifier, setLoginIdentifier] = (0, import_react21.useState)("");
     const [loginPassword, setLoginPassword] = (0, import_react21.useState)("");
     const [authError, setAuthError] = (0, import_react21.useState)("");
@@ -33460,7 +33461,81 @@
         showToast(err.message, "error");
       }
     };
-    const handleCheckout = async () => {
+    const handlePayWithPaystack = async (order) => {
+      if (!currentToken) {
+        setIsLoginOpen(true);
+        return;
+      }
+      const orderId = order.id;
+      const amountMinor = Number(order.total_minor || order.total_amount_minor || 0);
+      const orderNum = order.order_number || `#${orderId.substring(0, 8)}`;
+      setIsProcessingPayment(true);
+      try {
+        showToast(`Connecting to Paystack checkout for ${orderNum}...`, "info");
+        const idempotencyKey = `pay_${orderId}_${Date.now()}`;
+        const res = await fetch(`/v1/payments/orders/${orderId}/payments`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${currentToken}`,
+            "Idempotency-Key": idempotencyKey
+          },
+          body: JSON.stringify({ idempotency_key: idempotencyKey })
+        });
+        const data = await res.json();
+        if (!res.ok || !data.data) {
+          throw new Error(data.error?.message || "Could not initiate payment session.");
+        }
+        const payment = data.data;
+        const paystackPubKey = "pk_test_6567afd684881d60818b564d5e55108cf2276dc7";
+        if (typeof window !== "undefined" && window.PaystackPop && typeof window.PaystackPop.setup === "function") {
+          const handler = window.PaystackPop.setup({
+            key: paystackPubKey,
+            email: currentUser?.email || "customer@pharmalink.gh",
+            amount: amountMinor,
+            currency: "GHS",
+            channels: ["mobile_money", "card"],
+            ref: payment.provider_reference || `PL_PAY_${Date.now()}`,
+            callback: async (response) => {
+              showToast("Payment received! Verifying with network...", "success");
+              try {
+                const verifyRes = await fetch("/v1/payments/verify", {
+                  method: "POST",
+                  headers: {
+                    "Content-Type": "application/json",
+                    "Authorization": `Bearer ${currentToken}`
+                  },
+                  body: JSON.stringify({ reference: response.reference || payment.provider_reference })
+                });
+                const verifyData = await verifyRes.json();
+                if (verifyRes.ok && verifyData.data?.status === "SUCCESS") {
+                  showToast(`Payment of GHS ${(amountMinor / 100).toFixed(2)} verified successfully!`, "success");
+                }
+              } catch (vErr) {
+                console.warn("Payment verify warning:", vErr);
+              }
+              await fetchMyOrders();
+            },
+            onClose: () => {
+              showToast("Payment window closed.", "info");
+              fetchMyOrders();
+            }
+          });
+          handler.openIframe();
+        } else if (payment.authorization_url) {
+          window.open(payment.authorization_url, "_blank");
+          showToast("Paystack checkout opened in a new tab.", "info");
+        } else {
+          showToast("Payment session created. Reference: " + (payment.provider_reference || payment.id), "success");
+          fetchMyOrders();
+        }
+      } catch (err) {
+        showToast(err.message, "error");
+      } finally {
+        setIsProcessingPayment(false);
+      }
+    };
+    const handleCheckout = async (payOnline = false) => {
       if (!currentToken) {
         setIsCartOpen(false);
         setIsLoginOpen(true);
@@ -33492,9 +33567,10 @@
         });
         const data = await res.json();
         if (!res.ok || !data.data) throw new Error(data.error?.message || "Failed to submit order");
+        const createdOrder = data.data;
         if (hasPrescription) {
           const formData = new FormData();
-          formData.append("order_id", data.data.id);
+          formData.append("order_id", createdOrder.id);
           formData.append("file", prescriptionFile);
           const uploadRes = await fetch("/v1/prescriptions", {
             method: "POST",
@@ -33506,12 +33582,17 @@
             throw new Error(uploadData.error?.message || "Order created, but prescription upload failed. Contact support.");
           }
         }
-        showToast(`Order #${data.data.id.substring(0, 8)} placed successfully!`, "success");
+        showToast(`Order #${createdOrder.id.substring(0, 8)} placed successfully!`, "success");
         setCart({ pharmacyId: null, pharmacyName: null, fulfillmentType: "PICKUP", items: [], customerNote: "", deliveryAddress: location.name });
         setPrescriptionFile(null);
         setIsCartOpen(false);
-        fetchMyOrders();
+        await fetchMyOrders();
         setIsMyOrdersOpen(true);
+        if (payOnline) {
+          setTimeout(() => {
+            handlePayWithPaystack(createdOrder);
+          }, 400);
+        }
       } catch (err) {
         showToast(err.message, "error");
       }
@@ -34030,7 +34111,7 @@
         if (filtered.length === 0) {
           return /* @__PURE__ */ import_react21.default.createElement("tr", null, /* @__PURE__ */ import_react21.default.createElement("td", { colSpan: 5, style: { padding: "3rem", textAlign: "center", color: "var(--text-muted)" } }, pharmacyOrderSearch.trim() ? `No order found matching "${pharmacyOrderSearch}". Check the order number or customer phone.` : "No orders received yet. Incoming customer orders will appear here in real time."));
         }
-        return filtered.map((ord) => /* @__PURE__ */ import_react21.default.createElement("tr", { key: ord.id, style: { borderBottom: "1px solid var(--border)" } }, /* @__PURE__ */ import_react21.default.createElement("td", { style: { padding: "1rem 1.25rem" } }, /* @__PURE__ */ import_react21.default.createElement("div", { style: { fontFamily: "var(--font-mono)", fontWeight: 800, fontSize: "0.95rem" } }, ord.order_number || `#${ord.id.substring(0, 8)}`), /* @__PURE__ */ import_react21.default.createElement("div", { style: { fontSize: "0.8rem", color: "var(--text-muted)", marginTop: "0.2rem" } }, ord.customer_name || "Customer", " ", ord.customer_phone ? `\xB7 ${ord.customer_phone}` : "")), /* @__PURE__ */ import_react21.default.createElement("td", { style: { padding: "1rem 1.25rem" } }, /* @__PURE__ */ import_react21.default.createElement("div", { style: { fontWeight: 600 } }, ord.fulfillment_type === "PICKUP" ? "\u{1F3E5} Counter Pickup" : "\u{1F69A} Courier Delivery"), ord.delivery_address && /* @__PURE__ */ import_react21.default.createElement("div", { style: { fontSize: "0.78rem", color: "var(--text-muted)", maxWidth: "220px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, ord.delivery_address)), /* @__PURE__ */ import_react21.default.createElement("td", { style: { padding: "1rem 1.25rem", fontWeight: 800, color: "var(--primary)" } }, "GHS ", (Number(ord.total_minor || 0) / 100).toFixed(2)), /* @__PURE__ */ import_react21.default.createElement("td", { style: { padding: "1rem 1.25rem" } }, /* @__PURE__ */ import_react21.default.createElement("span", { className: `badge ${["ACCEPTED", "COMPLETED", "READY"].includes(ord.status) ? "badge-verified" : "badge-likely"}` }, ord.status === "ACCEPTED" ? "\u{1F512} RESERVED" : ord.status)), /* @__PURE__ */ import_react21.default.createElement("td", { style: { padding: "1rem 1.25rem" } }, ord.status === "PENDING" && /* @__PURE__ */ import_react21.default.createElement("div", { style: { display: "flex", gap: "0.4rem" } }, /* @__PURE__ */ import_react21.default.createElement("button", { className: "btn btn-primary btn-sm", onClick: () => handleAcceptOrder(ord.id) }, "\u2713 Accept & Reserve"), /* @__PURE__ */ import_react21.default.createElement("button", { className: "btn btn-secondary btn-sm", onClick: () => handleRejectOrder(ord.id) }, "\u2715 Reject")), ord.status === "ACCEPTED" && ord.fulfillment_type === "PICKUP" && /* @__PURE__ */ import_react21.default.createElement("div", { style: { display: "flex", gap: "0.4rem", flexWrap: "wrap" } }, /* @__PURE__ */ import_react21.default.createElement(
+        return filtered.map((ord) => /* @__PURE__ */ import_react21.default.createElement("tr", { key: ord.id, style: { borderBottom: "1px solid var(--border)" } }, /* @__PURE__ */ import_react21.default.createElement("td", { style: { padding: "1rem 1.25rem" } }, /* @__PURE__ */ import_react21.default.createElement("div", { style: { fontFamily: "var(--font-mono)", fontWeight: 800, fontSize: "0.95rem" } }, ord.order_number || `#${ord.id.substring(0, 8)}`), /* @__PURE__ */ import_react21.default.createElement("div", { style: { fontSize: "0.8rem", color: "var(--text-muted)", marginTop: "0.2rem" } }, ord.customer_name || "Customer", " ", ord.customer_phone ? `\xB7 ${ord.customer_phone}` : "")), /* @__PURE__ */ import_react21.default.createElement("td", { style: { padding: "1rem 1.25rem" } }, /* @__PURE__ */ import_react21.default.createElement("div", { style: { fontWeight: 600 } }, ord.fulfillment_type === "PICKUP" ? "\u{1F3E5} Counter Pickup" : "\u{1F69A} Courier Delivery"), ord.delivery_address && /* @__PURE__ */ import_react21.default.createElement("div", { style: { fontSize: "0.78rem", color: "var(--text-muted)", maxWidth: "220px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, ord.delivery_address)), /* @__PURE__ */ import_react21.default.createElement("td", { style: { padding: "1rem 1.25rem", fontWeight: 800, color: "var(--primary)" } }, "GHS ", (Number(ord.total_minor || 0) / 100).toFixed(2)), /* @__PURE__ */ import_react21.default.createElement("td", { style: { padding: "1rem 1.25rem" } }, /* @__PURE__ */ import_react21.default.createElement("div", { style: { display: "flex", flexDirection: "column", gap: "0.35rem", alignItems: "flex-start" } }, /* @__PURE__ */ import_react21.default.createElement("span", { className: `badge ${["ACCEPTED", "COMPLETED", "READY"].includes(ord.status) ? "badge-verified" : "badge-likely"}` }, ord.status === "ACCEPTED" ? "\u{1F512} RESERVED" : ord.status), ord.payment_status === "SUCCESS" ? /* @__PURE__ */ import_react21.default.createElement("span", { className: "badge badge-verified", style: { fontSize: "0.72rem", background: "rgba(16, 185, 129, 0.15)", color: "#10b981", border: "1px solid rgba(16, 185, 129, 0.3)" } }, "\u{1F4B3} PAID ONLINE") : /* @__PURE__ */ import_react21.default.createElement("span", { className: "badge badge-uncertain", style: { fontSize: "0.72rem" } }, "\u{1F4B5} PAY AT COUNTER"))), /* @__PURE__ */ import_react21.default.createElement("td", { style: { padding: "1rem 1.25rem" } }, ord.status === "PENDING" && /* @__PURE__ */ import_react21.default.createElement("div", { style: { display: "flex", gap: "0.4rem" } }, /* @__PURE__ */ import_react21.default.createElement("button", { className: "btn btn-primary btn-sm", onClick: () => handleAcceptOrder(ord.id) }, "\u2713 Accept & Reserve"), /* @__PURE__ */ import_react21.default.createElement("button", { className: "btn btn-secondary btn-sm", onClick: () => handleRejectOrder(ord.id) }, "\u2715 Reject")), ord.status === "ACCEPTED" && ord.fulfillment_type === "PICKUP" && /* @__PURE__ */ import_react21.default.createElement("div", { style: { display: "flex", gap: "0.4rem", flexWrap: "wrap" } }, /* @__PURE__ */ import_react21.default.createElement(
           "button",
           {
             className: "btn btn-primary btn-sm",
@@ -34213,7 +34294,33 @@
         onChange: handlePrescriptionFile,
         required: true
       }
-    ), prescriptionFile && /* @__PURE__ */ import_react21.default.createElement("div", { style: { fontSize: "0.82rem", color: "var(--primary)", fontWeight: 700, marginTop: "0.4rem" } }, "\u2713 File selected: ", prescriptionFile.name)), /* @__PURE__ */ import_react21.default.createElement("div", { style: { display: "flex", justifyContent: "space-between", marginTop: "1.25rem", paddingTop: "1rem", borderTop: "2px solid var(--border)", fontSize: "1.2rem", fontWeight: 900 } }, /* @__PURE__ */ import_react21.default.createElement("span", null, "Total Amount:"), /* @__PURE__ */ import_react21.default.createElement("span", { style: { color: "var(--primary)" } }, "GHS ", cartTotal.toFixed(2))), /* @__PURE__ */ import_react21.default.createElement("button", { className: "btn btn-primary", style: { width: "100%", marginTop: "1.25rem", padding: "0.85rem" }, onClick: handleCheckout }, "\u2713 Submit Order to Pharmacy"))))), pharmacyConflictItem && /* @__PURE__ */ import_react21.default.createElement("div", { className: "modal-overlay", onClick: () => setPharmacyConflictItem(null) }, /* @__PURE__ */ import_react21.default.createElement("div", { className: "modal-card", style: { maxWidth: "520px" }, onClick: (e) => e.stopPropagation() }, /* @__PURE__ */ import_react21.default.createElement("div", { className: "modal-header" }, /* @__PURE__ */ import_react21.default.createElement("div", { style: { display: "flex", alignItems: "center", gap: "0.75rem" } }, /* @__PURE__ */ import_react21.default.createElement("div", { style: {
+    ), prescriptionFile && /* @__PURE__ */ import_react21.default.createElement("div", { style: { fontSize: "0.82rem", color: "var(--primary)", fontWeight: 700, marginTop: "0.4rem" } }, "\u2713 File selected: ", prescriptionFile.name)), /* @__PURE__ */ import_react21.default.createElement("div", { style: { display: "flex", justifyContent: "space-between", marginTop: "1.25rem", paddingTop: "1rem", borderTop: "2px solid var(--border)", fontSize: "1.2rem", fontWeight: 900 } }, /* @__PURE__ */ import_react21.default.createElement("span", null, "Total Amount:"), /* @__PURE__ */ import_react21.default.createElement("span", { style: { color: "var(--primary)" } }, "GHS ", cartTotal.toFixed(2))), /* @__PURE__ */ import_react21.default.createElement("div", { style: { marginTop: "1.25rem", display: "flex", flexDirection: "column", gap: "0.65rem" } }, /* @__PURE__ */ import_react21.default.createElement(
+      "button",
+      {
+        className: "btn btn-primary",
+        style: {
+          width: "100%",
+          padding: "0.95rem",
+          fontSize: "1rem",
+          fontWeight: 800,
+          background: "linear-gradient(135deg, #059669 0%, #10b981 100%)",
+          boxShadow: "0 4px 14px rgba(5, 150, 105, 0.35)",
+          border: "none"
+        },
+        onClick: () => handleCheckout(true)
+      },
+      "\u{1F4B3} Pay Now with Mobile Money / Card (GHS ",
+      cartTotal.toFixed(2),
+      ")"
+    ), /* @__PURE__ */ import_react21.default.createElement(
+      "button",
+      {
+        className: "btn btn-outline",
+        style: { width: "100%", padding: "0.75rem", fontSize: "0.88rem" },
+        onClick: () => handleCheckout(false)
+      },
+      "\u{1F3E5} Submit Order (Pay on Pickup / Delivery)"
+    ), /* @__PURE__ */ import_react21.default.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "center", gap: "0.5rem", fontSize: "0.75rem", color: "var(--text-muted)", marginTop: "0.2rem" } }, /* @__PURE__ */ import_react21.default.createElement("span", null, "\u{1F512} Secured by Paystack"), /* @__PURE__ */ import_react21.default.createElement("span", null, "\u2022"), /* @__PURE__ */ import_react21.default.createElement("span", null, "MTN MoMo \xB7 Telecel \xB7 AT \xB7 Cards"))))))), pharmacyConflictItem && /* @__PURE__ */ import_react21.default.createElement("div", { className: "modal-overlay", onClick: () => setPharmacyConflictItem(null) }, /* @__PURE__ */ import_react21.default.createElement("div", { className: "modal-card", style: { maxWidth: "520px" }, onClick: (e) => e.stopPropagation() }, /* @__PURE__ */ import_react21.default.createElement("div", { className: "modal-header" }, /* @__PURE__ */ import_react21.default.createElement("div", { style: { display: "flex", alignItems: "center", gap: "0.75rem" } }, /* @__PURE__ */ import_react21.default.createElement("div", { style: {
       width: "40px",
       height: "40px",
       borderRadius: "12px",
@@ -34628,7 +34735,33 @@
       },
       /* @__PURE__ */ import_react21.default.createElement("strong", null, notification.type === "PRESCRIPTION_CLARIFICATION_REQUIRED" ? "Action required: prescription clarification" : notification.type === "ORDER_REJECTED" ? "Order update: pharmacy rejected the order" : "Prescription update"),
       /* @__PURE__ */ import_react21.default.createElement("div", { style: { marginTop: "0.25rem", fontSize: "0.82rem", color: "var(--text-muted)" } }, notification.type === "PRESCRIPTION_CLARIFICATION_REQUIRED" ? "The pharmacy needs more information before it can process your order." : notification.type === "ORDER_REJECTED" ? "Open the order below to review its status and rejection reason." : notification.type.replaceAll("_", " ").toLowerCase())
-    )), ordersLoading && /* @__PURE__ */ import_react21.default.createElement("p", null, "Loading your order history..."), ordersError && /* @__PURE__ */ import_react21.default.createElement("div", { style: { color: "var(--destructive-text)", background: "var(--destructive-bg)", padding: "0.75rem", borderRadius: "var(--radius-md)" } }, ordersError), !ordersLoading && !ordersError && myOrders.length === 0 && /* @__PURE__ */ import_react21.default.createElement("p", { style: { color: "var(--text-muted)", textAlign: "center", padding: "2rem 0" } }, "You have not placed any orders yet."), !ordersLoading && !ordersError && myOrders.map((order) => /* @__PURE__ */ import_react21.default.createElement("div", { key: order.id, style: { border: "1px solid var(--border)", borderRadius: "var(--radius-lg)", padding: "0.95rem", marginBottom: "0.85rem", background: "var(--surface)" } }, /* @__PURE__ */ import_react21.default.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: "0.5rem" } }, /* @__PURE__ */ import_react21.default.createElement("strong", { style: { fontFamily: "var(--font-mono)", fontSize: "0.95rem" } }, order.order_number || `#${order.id.substring(0, 8)}`), /* @__PURE__ */ import_react21.default.createElement("span", { className: `badge ${["ACCEPTED", "READY", "COMPLETED"].includes(order.status) ? "badge-verified" : "badge-likely"}` }, order.status === "ACCEPTED" ? "\u{1F512} STOCK RESERVED" : order.status)), /* @__PURE__ */ import_react21.default.createElement("div", { style: { fontSize: "0.85rem", color: "var(--text-muted)", marginTop: "0.35rem" } }, "\u{1F3E5} ", order.pharmacy_name || "Pharmacy", " \xB7 ", order.fulfillment_type === "PICKUP" ? "Counter Pickup" : "Delivery", " \xB7 ", /* @__PURE__ */ import_react21.default.createElement("strong", { style: { color: "var(--primary)" } }, "GHS ", (Number(order.total_minor || order.total_amount_minor || 0) / 100).toFixed(2))), order.delivery_address && /* @__PURE__ */ import_react21.default.createElement("div", { style: { fontSize: "0.82rem", marginTop: "0.25rem", color: "var(--text-muted)" } }, "\u{1F4CD} Address: ", order.delivery_address), order.status === "PENDING" && /* @__PURE__ */ import_react21.default.createElement("div", { style: { marginTop: "0.5rem", padding: "0.55rem 0.75rem", borderRadius: "var(--radius-md)", background: "rgba(59, 130, 246, 0.08)", border: "1px solid rgba(59, 130, 246, 0.2)", fontSize: "0.82rem" } }, "\u23F3 ", /* @__PURE__ */ import_react21.default.createElement("strong", null, "Order Pending:"), " Dispensary is confirming physical stock availability."), order.status === "ACCEPTED" && order.fulfillment_type === "PICKUP" && /* @__PURE__ */ import_react21.default.createElement("div", { style: { marginTop: "0.5rem", padding: "0.65rem 0.85rem", borderRadius: "var(--radius-md)", background: "rgba(16, 185, 129, 0.1)", border: "1px solid rgba(16, 185, 129, 0.3)", fontSize: "0.82rem" } }, "\u{1F512} ", /* @__PURE__ */ import_react21.default.createElement("strong", { style: { color: "#10b981" } }, "Stock Reserved at Dispensary!"), /* @__PURE__ */ import_react21.default.createElement("div", { style: { marginTop: "0.2rem", color: "var(--text-muted)" } }, "Visit ", /* @__PURE__ */ import_react21.default.createElement("strong", null, order.pharmacy_name || "the pharmacy"), " and present Order ", /* @__PURE__ */ import_react21.default.createElement("strong", null, "#", order.order_number || order.id.substring(0, 8)), " at the counter to verify and collect your medication.")), order.status === "ACCEPTED" && order.fulfillment_type === "DELIVERY" && /* @__PURE__ */ import_react21.default.createElement("div", { style: { marginTop: "0.5rem", padding: "0.65rem 0.85rem", borderRadius: "var(--radius-md)", background: "rgba(16, 185, 129, 0.1)", border: "1px solid rgba(16, 185, 129, 0.3)", fontSize: "0.82rem" } }, "\u{1F512} ", /* @__PURE__ */ import_react21.default.createElement("strong", { style: { color: "#10b981" } }, "Stock Reserved!"), /* @__PURE__ */ import_react21.default.createElement("div", { style: { marginTop: "0.2rem", color: "var(--text-muted)" } }, "The pharmacy has locked your medicines and is preparing them for courier dispatch.")), order.status === "READY" && /* @__PURE__ */ import_react21.default.createElement("div", { style: { marginTop: "0.5rem", padding: "0.65rem 0.85rem", borderRadius: "var(--radius-md)", background: "rgba(16, 185, 129, 0.15)", border: "1px solid rgba(16, 185, 129, 0.4)", fontSize: "0.82rem" } }, "\u2705 ", /* @__PURE__ */ import_react21.default.createElement("strong", { style: { color: "#10b981" } }, "Ready for Counter Pickup!"), /* @__PURE__ */ import_react21.default.createElement("div", { style: { marginTop: "0.2rem", color: "var(--text-muted)" } }, "Your package is prepared. Present Order ", /* @__PURE__ */ import_react21.default.createElement("strong", null, "#", order.order_number || order.id.substring(0, 8)), " at the dispensary counter.")), order.status === "OUT_FOR_DELIVERY" && /* @__PURE__ */ import_react21.default.createElement("div", { style: { marginTop: "0.5rem", padding: "0.65rem 0.85rem", borderRadius: "var(--radius-md)", background: "rgba(59, 130, 246, 0.12)", border: "1px solid rgba(59, 130, 246, 0.3)", fontSize: "0.82rem" } }, "\u{1F69A} ", /* @__PURE__ */ import_react21.default.createElement("strong", { style: { color: "var(--primary)" } }, "Out for Delivery!"), /* @__PURE__ */ import_react21.default.createElement("div", { style: { marginTop: "0.2rem", color: "var(--text-muted)" } }, "Courier is en route with your package.")), order.status === "COMPLETED" && /* @__PURE__ */ import_react21.default.createElement("div", { style: { marginTop: "0.5rem", padding: "0.55rem 0.75rem", borderRadius: "var(--radius-md)", background: "rgba(16, 185, 129, 0.08)", border: "1px solid rgba(16, 185, 129, 0.2)", fontSize: "0.82rem", color: "#10b981", fontWeight: 600 } }, "\u2713 Dispensed & Collected"), order.status === "REJECTED" && order.rejection_reason && /* @__PURE__ */ import_react21.default.createElement("div", { style: { marginTop: "0.6rem", padding: "0.65rem", borderRadius: "var(--radius-md)", background: "var(--destructive-bg)", color: "var(--destructive-text)", fontSize: "0.82rem" } }, /* @__PURE__ */ import_react21.default.createElement("strong", null, "Pharmacy reason:"), " ", order.rejection_reason), order.latest_prescription_status === "CLARIFICATION_REQUIRED" && /* @__PURE__ */ import_react21.default.createElement("div", { style: { marginTop: "0.6rem", padding: "0.75rem", borderRadius: "var(--radius-md)", background: "var(--accent)", border: "1px solid var(--border)" } }, /* @__PURE__ */ import_react21.default.createElement("strong", null, "Action required: update your prescription"), /* @__PURE__ */ import_react21.default.createElement("div", { style: { fontSize: "0.82rem", color: "var(--text-muted)", marginTop: "0.25rem" } }, order.latest_prescription_note || "The pharmacist requested clarification before dispensing."), /* @__PURE__ */ import_react21.default.createElement("label", { className: "btn btn-primary btn-sm", style: { display: "inline-block", marginTop: "0.6rem", cursor: "pointer" } }, "Upload replacement", /* @__PURE__ */ import_react21.default.createElement(
+    )), ordersLoading && /* @__PURE__ */ import_react21.default.createElement("p", null, "Loading your order history..."), ordersError && /* @__PURE__ */ import_react21.default.createElement("div", { style: { color: "var(--destructive-text)", background: "var(--destructive-bg)", padding: "0.75rem", borderRadius: "var(--radius-md)" } }, ordersError), !ordersLoading && !ordersError && myOrders.length === 0 && /* @__PURE__ */ import_react21.default.createElement("p", { style: { color: "var(--text-muted)", textAlign: "center", padding: "2rem 0" } }, "You have not placed any orders yet."), !ordersLoading && !ordersError && myOrders.map((order) => /* @__PURE__ */ import_react21.default.createElement("div", { key: order.id, style: { border: "1px solid var(--border)", borderRadius: "var(--radius-lg)", padding: "1.1rem", marginBottom: "1rem", background: "var(--surface)", boxShadow: "var(--shadow-xs)" } }, /* @__PURE__ */ import_react21.default.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: "0.5rem", flexWrap: "wrap" } }, /* @__PURE__ */ import_react21.default.createElement("strong", { style: { fontFamily: "var(--font-mono)", fontSize: "0.95rem" } }, order.order_number || `#${order.id.substring(0, 8)}`), /* @__PURE__ */ import_react21.default.createElement("div", { style: { display: "flex", gap: "0.4rem", alignItems: "center", flexWrap: "wrap" } }, order.payment_status === "SUCCESS" ? /* @__PURE__ */ import_react21.default.createElement("span", { className: "badge badge-verified", style: { background: "rgba(16, 185, 129, 0.15)", color: "#10b981", border: "1px solid rgba(16, 185, 129, 0.3)", fontWeight: 700 } }, "\u{1F4B3} PAID ONLINE") : /* @__PURE__ */ import_react21.default.createElement("span", { className: "badge badge-uncertain", style: { fontSize: "0.75rem" } }, "\u23F3 UNPAID"), /* @__PURE__ */ import_react21.default.createElement("span", { className: `badge ${["ACCEPTED", "READY", "COMPLETED"].includes(order.status) ? "badge-verified" : "badge-likely"}` }, order.status === "ACCEPTED" ? "\u{1F512} STOCK RESERVED" : order.status))), /* @__PURE__ */ import_react21.default.createElement("div", { style: { fontSize: "0.85rem", color: "var(--text-muted)", marginTop: "0.35rem" } }, "\u{1F3E5} ", order.pharmacy_name || "Pharmacy", " \xB7 ", order.fulfillment_type === "PICKUP" ? "Counter Pickup" : "Delivery", " \xB7 ", /* @__PURE__ */ import_react21.default.createElement("strong", { style: { color: "var(--primary)", fontSize: "0.95rem" } }, "GHS ", (Number(order.total_minor || order.total_amount_minor || 0) / 100).toFixed(2))), order.delivery_address && /* @__PURE__ */ import_react21.default.createElement("div", { style: { fontSize: "0.82rem", marginTop: "0.25rem", color: "var(--text-muted)" } }, "\u{1F4CD} Address: ", order.delivery_address), order.payment_status !== "SUCCESS" && !["CANCELLED", "REJECTED"].includes(order.status) && /* @__PURE__ */ import_react21.default.createElement("div", { style: {
+      marginTop: "0.75rem",
+      padding: "0.85rem 1rem",
+      borderRadius: "var(--radius-md)",
+      background: "rgba(5, 150, 105, 0.08)",
+      border: "1px solid rgba(5, 150, 105, 0.25)",
+      display: "flex",
+      justifyContent: "space-between",
+      alignItems: "center",
+      flexWrap: "wrap",
+      gap: "0.6rem"
+    } }, /* @__PURE__ */ import_react21.default.createElement("div", null, /* @__PURE__ */ import_react21.default.createElement("strong", { style: { fontSize: "0.88rem", color: "var(--primary)", display: "block" } }, "\u{1F4B3} Pay Online via Paystack"), /* @__PURE__ */ import_react21.default.createElement("div", { style: { fontSize: "0.78rem", color: "var(--text-muted)" } }, "MTN Mobile Money, Telecel Cash, AT Money, or Bank Card")), /* @__PURE__ */ import_react21.default.createElement(
+      "button",
+      {
+        className: "btn btn-primary btn-sm",
+        style: {
+          padding: "0.5rem 1.1rem",
+          fontWeight: 800,
+          fontSize: "0.85rem",
+          background: "linear-gradient(135deg, #059669 0%, #10b981 100%)",
+          boxShadow: "0 2px 8px rgba(5, 150, 105, 0.3)"
+        },
+        disabled: isProcessingPayment,
+        onClick: () => handlePayWithPaystack(order)
+      },
+      isProcessingPayment ? "Connecting..." : `Pay GHS ${(Number(order.total_minor || order.total_amount_minor || 0) / 100).toFixed(2)} Now`
+    )), order.status === "PENDING" && /* @__PURE__ */ import_react21.default.createElement("div", { style: { marginTop: "0.5rem", padding: "0.55rem 0.75rem", borderRadius: "var(--radius-md)", background: "rgba(59, 130, 246, 0.08)", border: "1px solid rgba(59, 130, 246, 0.2)", fontSize: "0.82rem" } }, "\u23F3 ", /* @__PURE__ */ import_react21.default.createElement("strong", null, "Order Pending:"), " Dispensary is confirming physical stock availability."), order.status === "ACCEPTED" && order.fulfillment_type === "PICKUP" && /* @__PURE__ */ import_react21.default.createElement("div", { style: { marginTop: "0.5rem", padding: "0.65rem 0.85rem", borderRadius: "var(--radius-md)", background: "rgba(16, 185, 129, 0.1)", border: "1px solid rgba(16, 185, 129, 0.3)", fontSize: "0.82rem" } }, "\u{1F512} ", /* @__PURE__ */ import_react21.default.createElement("strong", { style: { color: "#10b981" } }, "Stock Reserved at Dispensary!"), /* @__PURE__ */ import_react21.default.createElement("div", { style: { marginTop: "0.2rem", color: "var(--text-muted)" } }, "Visit ", /* @__PURE__ */ import_react21.default.createElement("strong", null, order.pharmacy_name || "the pharmacy"), " and present Order ", /* @__PURE__ */ import_react21.default.createElement("strong", null, "#", order.order_number || order.id.substring(0, 8)), " at the counter to verify and collect your medication.")), order.status === "ACCEPTED" && order.fulfillment_type === "DELIVERY" && /* @__PURE__ */ import_react21.default.createElement("div", { style: { marginTop: "0.5rem", padding: "0.65rem 0.85rem", borderRadius: "var(--radius-md)", background: "rgba(16, 185, 129, 0.1)", border: "1px solid rgba(16, 185, 129, 0.3)", fontSize: "0.82rem" } }, "\u{1F512} ", /* @__PURE__ */ import_react21.default.createElement("strong", { style: { color: "#10b981" } }, "Stock Reserved!"), /* @__PURE__ */ import_react21.default.createElement("div", { style: { marginTop: "0.2rem", color: "var(--text-muted)" } }, "The pharmacy has locked your medicines and is preparing them for courier dispatch.")), order.status === "READY" && /* @__PURE__ */ import_react21.default.createElement("div", { style: { marginTop: "0.5rem", padding: "0.65rem 0.85rem", borderRadius: "var(--radius-md)", background: "rgba(16, 185, 129, 0.15)", border: "1px solid rgba(16, 185, 129, 0.4)", fontSize: "0.82rem" } }, "\u2705 ", /* @__PURE__ */ import_react21.default.createElement("strong", { style: { color: "#10b981" } }, "Ready for Counter Pickup!"), /* @__PURE__ */ import_react21.default.createElement("div", { style: { marginTop: "0.2rem", color: "var(--text-muted)" } }, "Your package is prepared. Present Order ", /* @__PURE__ */ import_react21.default.createElement("strong", null, "#", order.order_number || order.id.substring(0, 8)), " at the dispensary counter.")), order.status === "OUT_FOR_DELIVERY" && /* @__PURE__ */ import_react21.default.createElement("div", { style: { marginTop: "0.5rem", padding: "0.65rem 0.85rem", borderRadius: "var(--radius-md)", background: "rgba(59, 130, 246, 0.12)", border: "1px solid rgba(59, 130, 246, 0.3)", fontSize: "0.82rem" } }, "\u{1F69A} ", /* @__PURE__ */ import_react21.default.createElement("strong", { style: { color: "var(--primary)" } }, "Out for Delivery!"), /* @__PURE__ */ import_react21.default.createElement("div", { style: { marginTop: "0.2rem", color: "var(--text-muted)" } }, "Courier is en route with your package.")), order.status === "COMPLETED" && /* @__PURE__ */ import_react21.default.createElement("div", { style: { marginTop: "0.5rem", padding: "0.55rem 0.75rem", borderRadius: "var(--radius-md)", background: "rgba(16, 185, 129, 0.08)", border: "1px solid rgba(16, 185, 129, 0.2)", fontSize: "0.82rem", color: "#10b981", fontWeight: 600 } }, "\u2713 Dispensed & Collected"), order.status === "REJECTED" && order.rejection_reason && /* @__PURE__ */ import_react21.default.createElement("div", { style: { marginTop: "0.6rem", padding: "0.65rem", borderRadius: "var(--radius-md)", background: "var(--destructive-bg)", color: "var(--destructive-text)", fontSize: "0.82rem" } }, /* @__PURE__ */ import_react21.default.createElement("strong", null, "Pharmacy reason:"), " ", order.rejection_reason), order.latest_prescription_status === "CLARIFICATION_REQUIRED" && /* @__PURE__ */ import_react21.default.createElement("div", { style: { marginTop: "0.6rem", padding: "0.75rem", borderRadius: "var(--radius-md)", background: "var(--accent)", border: "1px solid var(--border)" } }, /* @__PURE__ */ import_react21.default.createElement("strong", null, "Action required: update your prescription"), /* @__PURE__ */ import_react21.default.createElement("div", { style: { fontSize: "0.82rem", color: "var(--text-muted)", marginTop: "0.25rem" } }, order.latest_prescription_note || "The pharmacist requested clarification before dispensing."), /* @__PURE__ */ import_react21.default.createElement("label", { className: "btn btn-primary btn-sm", style: { display: "inline-block", marginTop: "0.6rem", cursor: "pointer" } }, "Upload replacement", /* @__PURE__ */ import_react21.default.createElement(
       "input",
       {
         type: "file",

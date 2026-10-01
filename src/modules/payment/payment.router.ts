@@ -14,6 +14,23 @@ paymentRouter.post('/orders/:orderId/payments', authenticateJwt, requireRoles('C
   }
 });
 
+paymentRouter.post('/verify', authenticateJwt, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const reference = req.body.reference || req.query.reference;
+    return sendSuccess(res, await PaymentService.verifyPayment(req.user!.id, reference));
+  } catch (err) {
+    next(err);
+  }
+});
+
+paymentRouter.get('/verify/:reference', authenticateJwt, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    return sendSuccess(res, await PaymentService.verifyPayment(req.user!.id, req.params.reference));
+  } catch (err) {
+    next(err);
+  }
+});
+
 paymentRouter.get('/reconciliation/pending', authenticateJwt, requireRoles('PLATFORM_OPS'), async (_req: Request, res: Response, next: NextFunction) => {
   try {
     return sendSuccess(res, await PaymentService.reconcile());

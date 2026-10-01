@@ -88,6 +88,9 @@ export class PaymentService {
       return concurrent.rows[0];
     }
 
+    const userRes = await db.query(`SELECT email FROM users WHERE id = $1`, [customerId]);
+    const customerEmail = userRes.rows[0]?.email || 'customer@pharmalink.gh';
+
     let providerResult: Awaited<ReturnType<PaymentProvider['initiate']>>;
     try {
       providerResult = await this.provider.initiate({
@@ -95,6 +98,7 @@ export class PaymentService {
         amountMinor: order.total_minor,
         currency: order.currency,
         orderId,
+        customerEmail,
       });
     } catch (error) {
       await db.query(`UPDATE payments SET status = 'FAILED', updated_at = CURRENT_TIMESTAMP WHERE id = $1`, [paymentId]);
@@ -127,6 +131,45 @@ export class PaymentService {
       authorization_url: providerResult.authorizationUrl,
       access_code: providerResult.accessCode,
     };
+  }
+
+  public static async verifyPayment(customerId: string, reference: string) {
+    if (!reference?.trim()) throw new ValidationError('Payment reference is required.');
+
+    let verification: { status: PaymentStatus; amount?: number; raw?: any } = { status: 'PENDING' };
+    if ('verifyTransaction' in this.provider && typeof (this.provider as any).verifyTransaction === 'function') {
+      try {
+        verification = await (this.provider as any).verifyTransaction(reference.trim());
+      } catch (err: any) {
+        console.error('Paystack verification error:', err);
+      }
+    }
+
+    const paymentRes = await db.query(
+      `SELECT p.* FROM payments p
+       JOIN orders o ON o.id = p.order_id
+       WHERE (p.provider_reference = $1 OR p.id = $1) AND o.customer_id = $2`,
+      [reference.trim(), customerId]
+    );
+
+    if (paymentRes.rowCount > 0) {
+      const payment = paymentRes.rows[0];
+      if (verification.status === 'SUCCESS' && payment.status !== 'SUCCESS') {
+        await db.query(`UPDATE payments SET status = 'SUCCESS', updated_at = CURRENT_TIMESTAMP WHERE id = $1`, [payment.id]);
+        await AuditService.recordEvent({
+          actorUserId: customerId,
+          pharmacyId: null,
+          eventType: 'PAYMENT_SUCCESS',
+          entityType: 'PAYMENT',
+          entityId: payment.id,
+          metadata: { provider: this.provider.name, reference: reference.trim() },
+        });
+        return { ...payment, status: 'SUCCESS' };
+      }
+      return payment;
+    }
+
+    return { status: verification.status, reference };
   }
 
   public static async getPayment(customerId: string, paymentId: string) {

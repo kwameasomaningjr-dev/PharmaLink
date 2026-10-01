@@ -833,6 +833,7 @@ function App() {
   const [selectedProvider, setSelectedProvider] = useState('primecare');
   const [webhookSecretInput, setWebhookSecretInput] = useState('');
   const [isSyncingPos, setIsSyncingPos] = useState(false);
+  const [isProcessingPayment, setIsProcessingPayment] = useState(false);
   
   // Forms state
   const [loginIdentifier, setLoginIdentifier] = useState('');
@@ -1525,8 +1526,88 @@ function App() {
     }
   };
 
-  // Submit Order
-  const handleCheckout = async () => {
+  // Paystack Online Payment Trigger (MTN MoMo, Telecel Cash, AT Money, Debit Card)
+  const handlePayWithPaystack = async (order) => {
+    if (!currentToken) {
+      setIsLoginOpen(true);
+      return;
+    }
+    const orderId = order.id;
+    const amountMinor = Number(order.total_minor || order.total_amount_minor || 0);
+    const orderNum = order.order_number || `#${orderId.substring(0, 8)}`;
+
+    setIsProcessingPayment(true);
+    try {
+      showToast(`Connecting to Paystack checkout for ${orderNum}...`, 'info');
+      const idempotencyKey = `pay_${orderId}_${Date.now()}`;
+      const res = await fetch(`/v1/payments/orders/${orderId}/payments`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${currentToken}`,
+          'Idempotency-Key': idempotencyKey,
+        },
+        body: JSON.stringify({ idempotency_key: idempotencyKey }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.data) {
+        throw new Error(data.error?.message || 'Could not initiate payment session.');
+      }
+
+      const payment = data.data;
+      const paystackPubKey = 'pk_test_6567afd684881d60818b564d5e55108cf2276dc7';
+
+      // Check if PaystackPop inline SDK is available in browser
+      if (typeof window !== 'undefined' && window.PaystackPop && typeof window.PaystackPop.setup === 'function') {
+        const handler = window.PaystackPop.setup({
+          key: paystackPubKey,
+          email: currentUser?.email || 'customer@pharmalink.gh',
+          amount: amountMinor,
+          currency: 'GHS',
+          channels: ['mobile_money', 'card'],
+          ref: payment.provider_reference || `PL_PAY_${Date.now()}`,
+          callback: async (response) => {
+            showToast('Payment received! Verifying with network...', 'success');
+            try {
+              const verifyRes = await fetch('/v1/payments/verify', {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'Authorization': `Bearer ${currentToken}`,
+                },
+                body: JSON.stringify({ reference: response.reference || payment.provider_reference }),
+              });
+              const verifyData = await verifyRes.json();
+              if (verifyRes.ok && verifyData.data?.status === 'SUCCESS') {
+                showToast(`Payment of GHS ${(amountMinor / 100).toFixed(2)} verified successfully!`, 'success');
+              }
+            } catch (vErr) {
+              console.warn('Payment verify warning:', vErr);
+            }
+            await fetchMyOrders();
+          },
+          onClose: () => {
+            showToast('Payment window closed.', 'info');
+            fetchMyOrders();
+          },
+        });
+        handler.openIframe();
+      } else if (payment.authorization_url) {
+        window.open(payment.authorization_url, '_blank');
+        showToast('Paystack checkout opened in a new tab.', 'info');
+      } else {
+        showToast('Payment session created. Reference: ' + (payment.provider_reference || payment.id), 'success');
+        fetchMyOrders();
+      }
+    } catch (err) {
+      showToast(err.message, 'error');
+    } finally {
+      setIsProcessingPayment(false);
+    }
+  };
+
+  // Submit Order & Optionally trigger instant Paystack payment
+  const handleCheckout = async (payOnline = false) => {
     if (!currentToken) {
       setIsCartOpen(false);
       setIsLoginOpen(true);
@@ -1561,9 +1642,11 @@ function App() {
       const data = await res.json();
       if (!res.ok || !data.data) throw new Error(data.error?.message || 'Failed to submit order');
 
+      const createdOrder = data.data;
+
       if (hasPrescription) {
         const formData = new FormData();
-        formData.append('order_id', data.data.id);
+        formData.append('order_id', createdOrder.id);
         formData.append('file', prescriptionFile);
         const uploadRes = await fetch('/v1/prescriptions', {
           method: 'POST',
@@ -1576,12 +1659,19 @@ function App() {
         }
       }
 
-      showToast(`Order #${data.data.id.substring(0, 8)} placed successfully!`, 'success');
+      showToast(`Order #${createdOrder.id.substring(0, 8)} placed successfully!`, 'success');
       setCart({ pharmacyId: null, pharmacyName: null, fulfillmentType: 'PICKUP', items: [], customerNote: '', deliveryAddress: location.name });
       setPrescriptionFile(null);
       setIsCartOpen(false);
-      fetchMyOrders();
+      await fetchMyOrders();
       setIsMyOrdersOpen(true);
+
+      if (payOnline) {
+        // Trigger Paystack inline payment directly for the newly created order
+        setTimeout(() => {
+          handlePayWithPaystack(createdOrder);
+        }, 400);
+      }
     } catch (err) {
       showToast(err.message, 'error');
     }
@@ -2533,9 +2623,20 @@ function App() {
                                   GHS {(Number(ord.total_minor || 0) / 100).toFixed(2)}
                                 </td>
                                 <td style={{ padding: '1rem 1.25rem' }}>
-                                  <span className={`badge ${['ACCEPTED', 'COMPLETED', 'READY'].includes(ord.status) ? 'badge-verified' : 'badge-likely'}`}>
-                                    {ord.status === 'ACCEPTED' ? '🔒 RESERVED' : ord.status}
-                                  </span>
+                                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem', alignItems: 'flex-start' }}>
+                                    <span className={`badge ${['ACCEPTED', 'COMPLETED', 'READY'].includes(ord.status) ? 'badge-verified' : 'badge-likely'}`}>
+                                      {ord.status === 'ACCEPTED' ? '🔒 RESERVED' : ord.status}
+                                    </span>
+                                    {ord.payment_status === 'SUCCESS' ? (
+                                      <span className="badge badge-verified" style={{ fontSize: '0.72rem', background: 'rgba(16, 185, 129, 0.15)', color: '#10b981', border: '1px solid rgba(16, 185, 129, 0.3)' }}>
+                                        💳 PAID ONLINE
+                                      </span>
+                                    ) : (
+                                      <span className="badge badge-uncertain" style={{ fontSize: '0.72rem' }}>
+                                        💵 PAY AT COUNTER
+                                      </span>
+                                    )}
+                                  </div>
                                 </td>
                                 <td style={{ padding: '1rem 1.25rem' }}>
                                   {ord.status === 'PENDING' && (
@@ -2953,9 +3054,37 @@ function App() {
                     <span style={{ color: 'var(--primary)' }}>GHS {cartTotal.toFixed(2)}</span>
                   </div>
 
-                  <button className="btn btn-primary" style={{ width: '100%', marginTop: '1.25rem', padding: '0.85rem' }} onClick={handleCheckout}>
-                    ✓ Submit Order to Pharmacy
-                  </button>
+                  <div style={{ marginTop: '1.25rem', display: 'flex', flexDirection: 'column', gap: '0.65rem' }}>
+                    <button
+                      className="btn btn-primary"
+                      style={{
+                        width: '100%',
+                        padding: '0.95rem',
+                        fontSize: '1rem',
+                        fontWeight: 800,
+                        background: 'linear-gradient(135deg, #059669 0%, #10b981 100%)',
+                        boxShadow: '0 4px 14px rgba(5, 150, 105, 0.35)',
+                        border: 'none',
+                      }}
+                      onClick={() => handleCheckout(true)}
+                    >
+                      💳 Pay Now with Mobile Money / Card (GHS {cartTotal.toFixed(2)})
+                    </button>
+
+                    <button
+                      className="btn btn-outline"
+                      style={{ width: '100%', padding: '0.75rem', fontSize: '0.88rem' }}
+                      onClick={() => handleCheckout(false)}
+                    >
+                      🏥 Submit Order (Pay on Pickup / Delivery)
+                    </button>
+
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.2rem' }}>
+                      <span>🔒 Secured by Paystack</span>
+                      <span>•</span>
+                      <span>MTN MoMo · Telecel · AT · Cards</span>
+                    </div>
+                  </div>
                 </div>
               )}
             </div>
@@ -3798,17 +3927,63 @@ function App() {
                 <p style={{ color: 'var(--text-muted)', textAlign: 'center', padding: '2rem 0' }}>You have not placed any orders yet.</p>
               )}
               {!ordersLoading && !ordersError && myOrders.map((order) => (
-                <div key={order.id} style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius-lg)', padding: '0.95rem', marginBottom: '0.85rem', background: 'var(--surface)' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.5rem' }}>
+                <div key={order.id} style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius-lg)', padding: '1.1rem', marginBottom: '1rem', background: 'var(--surface)', boxShadow: 'var(--shadow-xs)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
                     <strong style={{ fontFamily: 'var(--font-mono)', fontSize: '0.95rem' }}>{order.order_number || `#${order.id.substring(0, 8)}`}</strong>
-                    <span className={`badge ${['ACCEPTED', 'READY', 'COMPLETED'].includes(order.status) ? 'badge-verified' : 'badge-likely'}`}>
-                      {order.status === 'ACCEPTED' ? '🔒 STOCK RESERVED' : order.status}
-                    </span>
+                    <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                      {order.payment_status === 'SUCCESS' ? (
+                        <span className="badge badge-verified" style={{ background: 'rgba(16, 185, 129, 0.15)', color: '#10b981', border: '1px solid rgba(16, 185, 129, 0.3)', fontWeight: 700 }}>
+                          💳 PAID ONLINE
+                        </span>
+                      ) : (
+                        <span className="badge badge-uncertain" style={{ fontSize: '0.75rem' }}>
+                          ⏳ UNPAID
+                        </span>
+                      )}
+                      <span className={`badge ${['ACCEPTED', 'READY', 'COMPLETED'].includes(order.status) ? 'badge-verified' : 'badge-likely'}`}>
+                        {order.status === 'ACCEPTED' ? '🔒 STOCK RESERVED' : order.status}
+                      </span>
+                    </div>
                   </div>
                   <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginTop: '0.35rem' }}>
-                    🏥 {order.pharmacy_name || 'Pharmacy'} · {order.fulfillment_type === 'PICKUP' ? 'Counter Pickup' : 'Delivery'} · <strong style={{ color: 'var(--primary)' }}>GHS {(Number(order.total_minor || order.total_amount_minor || 0) / 100).toFixed(2)}</strong>
+                    🏥 {order.pharmacy_name || 'Pharmacy'} · {order.fulfillment_type === 'PICKUP' ? 'Counter Pickup' : 'Delivery'} · <strong style={{ color: 'var(--primary)', fontSize: '0.95rem' }}>GHS {(Number(order.total_minor || order.total_amount_minor || 0) / 100).toFixed(2)}</strong>
                   </div>
                   {order.delivery_address && <div style={{ fontSize: '0.82rem', marginTop: '0.25rem', color: 'var(--text-muted)' }}>📍 Address: {order.delivery_address}</div>}
+
+                  {/* Direct Online Payment Banner if Unpaid */}
+                  {order.payment_status !== 'SUCCESS' && !['CANCELLED', 'REJECTED'].includes(order.status) && (
+                    <div style={{
+                      marginTop: '0.75rem',
+                      padding: '0.85rem 1rem',
+                      borderRadius: 'var(--radius-md)',
+                      background: 'rgba(5, 150, 105, 0.08)',
+                      border: '1px solid rgba(5, 150, 105, 0.25)',
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      flexWrap: 'wrap',
+                      gap: '0.6rem'
+                    }}>
+                      <div>
+                        <strong style={{ fontSize: '0.88rem', color: 'var(--primary)', display: 'block' }}>💳 Pay Online via Paystack</strong>
+                        <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>MTN Mobile Money, Telecel Cash, AT Money, or Bank Card</div>
+                      </div>
+                      <button
+                        className="btn btn-primary btn-sm"
+                        style={{
+                          padding: '0.5rem 1.1rem',
+                          fontWeight: 800,
+                          fontSize: '0.85rem',
+                          background: 'linear-gradient(135deg, #059669 0%, #10b981 100%)',
+                          boxShadow: '0 2px 8px rgba(5, 150, 105, 0.3)',
+                        }}
+                        disabled={isProcessingPayment}
+                        onClick={() => handlePayWithPaystack(order)}
+                      >
+                        {isProcessingPayment ? 'Connecting...' : `Pay GHS ${(Number(order.total_minor || order.total_amount_minor || 0) / 100).toFixed(2)} Now`}
+                      </button>
+                    </div>
+                  )}
 
                   {/* Status Instructions */}
                   {order.status === 'PENDING' && (

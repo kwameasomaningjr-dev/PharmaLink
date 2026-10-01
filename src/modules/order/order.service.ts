@@ -644,7 +644,21 @@ export class OrderService {
                 WHERE p2.order_id = o.id
                 ORDER BY p2.created_at DESC
                 LIMIT 1
-              ) as latest_prescription_note
+              ) as latest_prescription_note,
+              (
+                SELECT p3.status
+                FROM payments p3
+                WHERE p3.order_id = o.id
+                ORDER BY p3.created_at DESC
+                LIMIT 1
+              ) as payment_status,
+              (
+                SELECT p3.provider_reference
+                FROM payments p3
+                WHERE p3.order_id = o.id
+                ORDER BY p3.created_at DESC
+                LIMIT 1
+              ) as payment_reference
        FROM orders o
        JOIN pharmacies p ON p.id = o.pharmacy_id
        WHERE o.customer_id = $1
@@ -655,7 +669,21 @@ export class OrderService {
   }
 
   public static async listPharmacyOrders(pharmacyId: string, status?: OrderStatus) {
-    let sql = `SELECT o.*, u.first_name || ' ' || COALESCE(u.last_name, '') as customer_name, u.phone as customer_phone
+    let sql = `SELECT o.*, u.first_name || ' ' || COALESCE(u.last_name, '') as customer_name, u.phone as customer_phone,
+               (
+                 SELECT p3.status
+                 FROM payments p3
+                 WHERE p3.order_id = o.id
+                 ORDER BY p3.created_at DESC
+                 LIMIT 1
+               ) as payment_status,
+               (
+                 SELECT p3.provider_reference
+                 FROM payments p3
+                 WHERE p3.order_id = o.id
+                 ORDER BY p3.created_at DESC
+                 LIMIT 1
+               ) as payment_reference
                FROM orders o
                JOIN users u ON u.id = o.customer_id
                WHERE o.pharmacy_id = $1`;
