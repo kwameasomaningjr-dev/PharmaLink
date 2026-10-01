@@ -13,7 +13,12 @@ export function createApp() {
     .map((origin) => origin.trim())
     .filter(Boolean);
   const corsOrigin = configuredOrigins.length === 1 ? configuredOrigins[0] : configuredOrigins;
-  const apiRateLimiter = rateLimit({
+
+  const rateLimitFn: any = typeof rateLimit === 'function' ? rateLimit : (rateLimit as any)?.default || rateLimit;
+  const helmetFn: any = typeof helmet === 'function' ? helmet : (helmet as any)?.default || helmet;
+  const corsFn: any = typeof cors === 'function' ? cors : (cors as any)?.default || cors;
+
+  const apiRateLimiter = rateLimitFn({
     windowMs: 60 * 1000,
     max: Number(process.env.API_RATE_LIMIT_PER_MINUTE || 120),
     standardHeaders: true,
@@ -23,8 +28,8 @@ export function createApp() {
 
   // Standard middleware
   app.disable('x-powered-by');
-  app.use(helmet({ contentSecurityPolicy: false }));
-  app.use(cors({ origin: corsOrigin }));
+  app.use(helmetFn({ contentSecurityPolicy: false }));
+  app.use(corsFn({ origin: corsOrigin }));
   app.use(express.json({
     limit: '10mb',
     verify: (req, _res, buffer) => {
