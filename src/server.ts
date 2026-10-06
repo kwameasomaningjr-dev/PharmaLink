@@ -6,7 +6,7 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
-const PORT = process.env.PORT || 4000;
+const PORT = Number(process.env.PORT) || 4000;
 
 async function startServer() {
   try {
@@ -15,7 +15,7 @@ async function startServer() {
     await seedDatabase(process.env.NODE_ENV === 'test');
 
     const app = createApp();
-    const server = app.listen(PORT, () => {
+    const server = app.listen(PORT, '0.0.0.0', () => {
       console.log(`[Server] PharmaLink API running on http://localhost:${PORT}/v1`);
       console.log(`[Server] Health check: http://localhost:${PORT}/health`);
       if (process.env.NODE_ENV !== 'test') {
