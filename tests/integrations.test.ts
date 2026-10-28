@@ -1,10 +1,10 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 import request from 'supertest';
 import crypto from 'node:crypto';
-import { createApp } from '../src/app.js';
-import { seedDatabase } from '../src/database/seed.js';
-import { IntegrationCronService } from '../src/modules/integration/cron.service.js';
-import { db } from '../src/database/connection.js';
+import { createApp } from '../backend/app.js';
+import { seedDatabase } from '../backend/database/seed.js';
+import { IntegrationCronService } from '../backend/modules/integration/cron.service.js';
+import { db } from '../backend/database/connection.js';
 
 const app = createApp();
 let pharmacyStaffToken = '';

@@ -4,13 +4,15 @@
   "type": "module",
   "description": "Ghana-first digital pharmacy availability and ordering platform MVP",
   "scripts": {
-    "dev": "tsx watch src/server.ts",
-    "build": "npm run build:frontend && tsc",
-    "build:frontend": "esbuild public/app.jsx --bundle --platform=browser --format=iife --target=es2020 --outfile=public/app.js && node -e \"import('fs').then(fs => { fs.copyFileSync('public/app.js', 'app.js'); fs.copyFileSync('public/app.css', 'app.css'); })\"",
+    "dev": "tsx watch backend/server.ts",
+    "build": "npm run build:frontend && npm run build:backend",
+    "build:backend": "tsc",
+    "build:frontend": "node scripts/build-frontend.mjs",
     "start": "node dist/server.js",
     "test": "vitest run",
     "test:watch": "vitest",
-    "seed": "tsx src/database/seed.ts"
+    "seed": "tsx backend/database/seed.ts",
+    "audit": "npm audit --registry=https://registry.npmjs.org/"
   },
   "keywords": [
     "pharmacy",
@@ -55,6 +57,6 @@
     "supertest": "^7.0.0",
     "tsx": "^4.19.3",
     "typescript": "^5.7.3",
-    "vitest": "^3.0.7"
+    "vitest": "^5.0.4"
   }
 }

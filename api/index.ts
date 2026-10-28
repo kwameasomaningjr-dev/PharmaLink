@@ -1,5 +1,5 @@
-import { createApp } from '../src/app.js';
-import { seedDatabase } from '../src/database/seed.js';
+import { createApp } from '../backend/app.js';
+import { seedDatabase } from '../backend/database/seed.js';
 
 let appInstance: any = null;
 let initPromise: Promise<void> | null = null;

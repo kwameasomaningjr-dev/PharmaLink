@@ -1,0 +1,51 @@
+name: GH PharmaLink CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test-and-build:
+    name: Build, Typecheck & Vitest (Node ${{ matrix.node-version }})
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: [20.x, 22.x]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: TypeScript Static Typecheck
+        run: npx tsc --noEmit
+
+      - name: Build Frontend Application Bundle
+        run: npm run build:frontend
+
+      - name: Compile Backend TypeScript
+        run: npx tsc
+
+      - name: Run Vitest Acceptance & Integration Tests
+        run: npm test
+        env:
+          NODE_ENV: test
+          JWT_SECRET: ci-pipeline-secure-test-jwt-secret-key-32chars
+          PORT: 4000

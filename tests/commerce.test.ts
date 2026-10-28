@@ -1,10 +1,10 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 import request from 'supertest';
-import { createApp } from '../src/app.js';
-import { seedDatabase } from '../src/database/seed.js';
-import { IntegrationService } from '../src/modules/integration/integration.service.js';
-import { NotificationService } from '../src/modules/notification/notification.service.js';
-import { db } from '../src/database/connection.js';
+import { createApp } from '../backend/app.js';
+import { seedDatabase } from '../backend/database/seed.js';
+import { IntegrationService } from '../backend/modules/integration/integration.service.js';
+import { NotificationService } from '../backend/modules/notification/notification.service.js';
+import { db } from '../backend/database/connection.js';
 
 const app = createApp();
 let customerToken = '';
