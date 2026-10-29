@@ -164,7 +164,13 @@ export async function requirePharmacyStaff(req: Request, _res: Response, next: N
 
   if (req.user.role === 'PLATFORM_OPS') {
     const overrideId = (req.headers['x-pharmacy-id'] as string) || (req.body && req.body.pharmacy_id) || req.user.pharmacy_id;
-    if (overrideId) req.pharmacyId = overrideId;
+    if (overrideId) {
+      const pharmacyExists = await db.query(`SELECT id FROM pharmacies WHERE id = $1`, [overrideId]);
+      if (pharmacyExists.rowCount === 0) {
+        return next(new ForbiddenError('Unknown pharmacy context.'));
+      }
+      req.pharmacyId = overrideId;
+    }
     return next();
   }
 
@@ -172,69 +178,42 @@ export async function requirePharmacyStaff(req: Request, _res: Response, next: N
     return next(new ForbiddenError('Access restricted to verified pharmacy personnel'));
   }
 
-  // 1. Look up user's active or existing pharmacy association
-  if (!req.user.pharmacy_id) {
-    const pRes = await db.query(
-      `SELECT pu.pharmacy_id, pu.role as pharmacy_staff_role, pu.status as staff_status
-       FROM pharmacy_users pu
-       WHERE pu.user_id = $1
-       ORDER BY CASE WHEN pu.status = 'ACTIVE' THEN 1 ELSE 2 END
-       LIMIT 1`,
-      [req.user.id]
-    );
-    if (pRes.rowCount > 0) {
-      req.user.pharmacy_id = pRes.rows[0].pharmacy_id;
-      req.user.pharmacy_role = pRes.rows[0].pharmacy_staff_role;
-      req.pharmacyId = req.user.pharmacy_id;
-    }
-  }
+  const user = req.user;
+  const candidateId = (req.headers['x-pharmacy-id'] as string) || (req.body && req.body.pharmacy_id);
+  const membershipRes = await db.query(
+    `SELECT pu.pharmacy_id, pu.role AS pharmacy_staff_role, pu.status AS staff_status
+     FROM pharmacy_users pu
+     WHERE pu.user_id = $1 AND pu.status = 'ACTIVE'`,
+    [user.id]
+  );
 
-  // 2. Check header or body pharmacy context for admin role
-  if (!req.user.pharmacy_id) {
-    const candidateId = (req.headers['x-pharmacy-id'] as string) || (req.body && req.body.pharmacy_id);
-    if (candidateId) {
-      const pCheck = await db.query(`SELECT id FROM pharmacies WHERE id = $1`, [candidateId]);
-      if (pCheck.rowCount > 0) {
-        await db.query(
-          `INSERT INTO pharmacy_users (id, pharmacy_id, user_id, role, status)
-           VALUES ($1, $2, $3, 'ADMIN', 'ACTIVE')
-           ON CONFLICT (pharmacy_id, user_id) DO UPDATE SET status = 'ACTIVE'`,
-          [uuidv4(), candidateId, req.user.id]
-        );
-        req.user.pharmacy_id = candidateId;
-        req.user.pharmacy_role = 'ADMIN';
-        req.pharmacyId = candidateId;
-      }
-    }
-  }
-
-  // 3. Fallback for PHARMACY_ADMIN: associate with matching or default verified pharmacy
-  if (!req.user.pharmacy_id && req.user.role === 'PHARMACY_ADMIN') {
-    const firstP = await db.query(`SELECT id FROM pharmacies WHERE verification_status = 'VERIFIED' LIMIT 1`);
-    if (firstP.rowCount > 0) {
-      const fallbackId = firstP.rows[0].id;
-      await db.query(
-        `INSERT INTO pharmacy_users (id, pharmacy_id, user_id, role, status)
-         VALUES ($1, $2, $3, 'ADMIN', 'ACTIVE')
-         ON CONFLICT (pharmacy_id, user_id) DO UPDATE SET status = 'ACTIVE'`,
-        [uuidv4(), fallbackId, req.user.id]
-      );
-      req.user.pharmacy_id = fallbackId;
-      req.user.pharmacy_role = 'ADMIN';
-      req.pharmacyId = fallbackId;
-    }
-  }
-
-  if (!req.user.pharmacy_id) {
+  if (membershipRes.rowCount === 0) {
     return next(new ForbiddenError('No pharmacy associated with this account'));
   }
+
+  const memberships = membershipRes.rows;
+  const selectedMembership = candidateId
+    ? memberships.find((row: any) => row.pharmacy_id === candidateId)
+    : memberships.find((row: any) => row.pharmacy_id === user.pharmacy_id) || memberships[0];
+
+  if (candidateId && !selectedMembership) {
+    return next(new ForbiddenError('This account is not associated with the selected pharmacy'));
+  }
+
+  if (!selectedMembership) {
+    return next(new ForbiddenError('No pharmacy associated with this account'));
+  }
+
+  req.user.pharmacy_id = selectedMembership.pharmacy_id;
+  req.user.pharmacy_role = selectedMembership.pharmacy_staff_role;
+  req.pharmacyId = selectedMembership.pharmacy_id;
 
   try {
     const pharmacyRes = await db.query(
       `SELECT p.verification_status, pu.status AS staff_status, pu.role AS pharmacy_staff_role
        FROM pharmacies p
        JOIN pharmacy_users pu ON pu.pharmacy_id = p.id
-       WHERE p.id = $1 AND pu.user_id = $2`,
+       WHERE p.id = $1 AND pu.user_id = $2 AND pu.status = 'ACTIVE'`,
       [req.user.pharmacy_id, req.user.id]
     );
 

@@ -287,6 +287,29 @@ describe('PHARMACY PLATFORM ACCEPTANCE TESTS', () => {
     expect(acceptRes.body.data.status).toBe('ACCEPTED');
   });
 
+  it('SEC-03: Pharmacy staff cannot be tenant-hijacked by forged pharmacy context', async () => {
+    const eastLegonInventory = await request(app)
+      .get('/v1/inventory')
+      .set('Authorization', `Bearer ${eastLegonStaffToken}`)
+      .set('x-pharmacy-id', 'e2222222-2222-2222-2222-222222222222');
+
+    expect(eastLegonInventory.status).toBe(403);
+    expect(eastLegonInventory.body.error.code).toBe('FORBIDDEN');
+
+    const eastLegonInvite = await request(app)
+      .post('/v1/pharmacy/staff/invite')
+      .set('Authorization', `Bearer ${eastLegonStaffToken}`)
+      .send({
+        email: 'tenant-bypass@eastlegonrx.gh',
+        first_name: 'Banned',
+        role: 'STAFF',
+        pharmacy_id: 'e2222222-2222-2222-2222-222222222222',
+      });
+
+    expect(eastLegonInvite.status).toBe(403);
+    expect(eastLegonInvite.body.error.code).toBe('FORBIDDEN');
+  });
+
   // AT-11 & AT-12: Tenant Isolation & Authorization Boundaries
   it('AT-11 & AT-12: Pharmacy staff cannot access another pharmacys private orders or inventory', async () => {
     // Osu staff tries to view East Legon inventory

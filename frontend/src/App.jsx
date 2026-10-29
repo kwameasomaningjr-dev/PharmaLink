@@ -1518,17 +1518,18 @@ function App() {
   }, [currentToken]);
 
   const loadPlatformData = useCallback(async (token = currentToken) => {
-    if (!token || currentUser?.role !== 'PLATFORM_OPS') return;
+    const activeTok = token || currentToken;
+    if (!activeTok) return;
     setPlatformLoading(true);
     try {
       const res = await fetch('/v1/platform/pharmacies', {
-        headers: { 'Authorization': `Bearer ${token}` }
+        headers: { 'Authorization': `Bearer ${activeTok}` }
       });
       const data = await res.json();
       if (!res.ok || !data.data) throw new Error(data.error?.message || 'Could not load pharmacy network.');
       setPlatformPharmacies(data.data);
       const auditRes = await fetch('/v1/platform/audit?limit=30', {
-        headers: { 'Authorization': `Bearer ${token}` }
+        headers: { 'Authorization': `Bearer ${activeTok}` }
       });
       const auditData = await auditRes.json();
       if (!auditRes.ok || !auditData.data) throw new Error(auditData.error?.message || 'Could not load platform audit activity.');
@@ -1538,7 +1539,7 @@ function App() {
     } finally {
       setPlatformLoading(false);
     }
-  }, [currentToken, currentUser, showToast]);
+  }, [currentToken, showToast]);
 
   const loadVerifiedPharmacies = useCallback(async () => {
     setVerifiedPharmaciesLoading(true);
@@ -1585,6 +1586,7 @@ function App() {
             } else {
               setActiveAdminPage('network');
             }
+            loadPlatformData(currentToken);
           } else if (['PHARMACY_ADMIN', 'PHARMACY_STAFF'].includes(data.data.user.role)) {
             setActivePortal('pharmacy');
             if (currentPath.startsWith('/pharmacy/')) {
@@ -2029,10 +2031,10 @@ function App() {
     if (activePortal === 'pharmacy' && currentToken && currentUser?.role !== 'PLATFORM_OPS') {
       loadPharmacyData(currentToken);
     }
-    if (activePortal === 'platform' && currentToken && currentUser?.role === 'PLATFORM_OPS') {
+    if (activePortal === 'platform' && currentToken) {
       loadPlatformData(currentToken);
     }
-  }, [activePortal, currentToken, currentUser, loadPharmacyData, loadPlatformData]);
+  }, [activePortal, currentToken, currentUser?.role, loadPharmacyData, loadPlatformData]);
 
   // Cart Management
   const addToCart = (resultItem) => {
@@ -4641,22 +4643,6 @@ function App() {
                   }}
                 >
                   🏥 Go to Pharmacy Operations Portal
-                </button>
-              )}
-
-              {currentUser.role === 'PLATFORM_OPS' && (
-                <button
-                  className="btn btn-primary"
-                  style={{ width: '100%', marginBottom: '0.75rem', padding: '0.75rem', fontWeight: 700 }}
-                  onClick={() => {
-                    setIsProfileOpen(false);
-                    setActivePortal('platform');
-                    setActiveAdminPage('network');
-                    window.history.pushState({}, '', '/platform/network');
-                    if (currentToken) loadPlatformData(currentToken);
-                  }}
-                >
-                  🛡️ Go to Platform Operations Portal
                 </button>
               )}
 
