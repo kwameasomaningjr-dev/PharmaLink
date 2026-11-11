@@ -221,12 +221,24 @@ describe('security and production readiness guards', () => {
     }
   });
 
-  it('uses valid PWA manifest shortcuts and contains no hardcoded Paystack keys in frontend source', () => {
+  it('uses valid PWA manifest shortcuts, real PNG icons, and contains no hardcoded Paystack keys in frontend source', () => {
     const manifestPath = path.resolve(process.cwd(), 'frontend/public/manifest.json');
     const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
     const shortcutUrls = (manifest.shortcuts || []).map((s: any) => s.url);
 
     expect(shortcutUrls).toEqual(['/medicines', '/pharmacies', '/prescriptions']);
+
+    const icons = manifest.icons || [];
+    expect(icons.length).toBeGreaterThanOrEqual(2);
+    for (const icon of icons) {
+      const iconPath = path.resolve(process.cwd(), 'frontend/public', String(icon.src).replace(/^\/+/, ''));
+      expect(fs.existsSync(iconPath)).toBe(true);
+      const buf = fs.readFileSync(iconPath);
+      expect(buf.subarray(0, 8).toString('hex')).toBe('89504e470d0a1a0a');
+      const [expectedW, expectedH] = String(icon.sizes).split('x').map(Number);
+      expect(buf.readUInt32BE(16)).toBe(expectedW);
+      expect(buf.readUInt32BE(20)).toBe(expectedH);
+    }
 
     const appJsxPath = path.resolve(process.cwd(), 'frontend/src/App.jsx');
     const appJsx = fs.readFileSync(appJsxPath, 'utf8');

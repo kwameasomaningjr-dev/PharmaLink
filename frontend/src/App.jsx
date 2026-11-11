@@ -246,6 +246,44 @@ function App() {
     } catch {}
   }, [pharmacyData]);
 
+  const [deferredInstallPrompt, setDeferredInstallPrompt] = useState(null);
+  const [isInstallDismissed, setIsInstallDismissed] = useState(false);
+  const [isStandaloneMode, setIsStandaloneMode] = useState(() => {
+    try {
+      return window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+    } catch {
+      return false;
+    }
+  });
+
+  useEffect(() => {
+    const handleBeforeInstallPrompt = (event) => {
+      event.preventDefault();
+      setDeferredInstallPrompt(event);
+    };
+    const handleAppInstalled = () => {
+      setDeferredInstallPrompt(null);
+      setIsStandaloneMode(true);
+    };
+    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+    window.addEventListener('appinstalled', handleAppInstalled);
+    return () => {
+      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+      window.removeEventListener('appinstalled', handleAppInstalled);
+    };
+  }, []);
+
+  const handleInstallPwa = async () => {
+    if (!deferredInstallPrompt) return;
+    deferredInstallPrompt.prompt();
+    try {
+      const choice = await deferredInstallPrompt.userChoice;
+      if (choice?.outcome === 'accepted') {
+        setDeferredInstallPrompt(null);
+      }
+    } catch {}
+  };
+
   const isPharmacyUser = useMemo(() => {
     return (
       currentUser?.role === 'PLATFORM_OPS' ||
@@ -2491,6 +2529,29 @@ function App() {
           © 2026 GH PharmaLink (ghpharmalink.com). Regulated and accredited under Ghana Pharmacy Council guidelines.
         </div>
       </footer>}
+
+      {deferredInstallPrompt && !isStandaloneMode && !isInstallDismissed && (
+        <div className="pwa-install-banner" role="region" aria-label="Install GH PharmaLink App">
+          <div className="pwa-install-copy">
+            <strong>Install GH PharmaLink</strong>
+            <span>Quick access to Ghana pharmacies on your home screen</span>
+          </div>
+          <div className="pwa-install-actions">
+            <button type="button" className="btn btn-primary btn-sm" onClick={handleInstallPwa}>
+              Install App
+            </button>
+            <button
+              type="button"
+              className="btn btn-outline btn-sm"
+              style={{ color: '#e2e8f0', borderColor: 'rgba(255,255,255,0.22)' }}
+              onClick={() => setIsInstallDismissed(true)}
+              aria-label="Dismiss install prompt"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* MOBILE BOTTOM NAVIGATION BAR */}
       {activePortal === 'customer' && (

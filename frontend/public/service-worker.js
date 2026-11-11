@@ -1,11 +1,14 @@
-const CACHE_NAME = 'pharmalink-pwa-v1';
+const CACHE_NAME = 'pharmalink-pwa-v2';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
   '/app.css',
   '/app.js',
   '/manifest.json',
-  '/logo.png'
+  '/logo.png',
+  '/icon-192.png',
+  '/icon-512.png',
+  '/icon-maskable-512.png'
 ];
 
 self.addEventListener('install', (event) => {
