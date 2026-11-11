@@ -757,7 +757,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
   font-family: var(--font-sans);
   font-size: 0.88rem;
   font-weight: 700;
-  border-radius: var(--radius-full);
+  border-radius: var(--radius-md);
   border: 1px solid transparent;
   backdrop-filter: blur(14px) saturate(180%);
   -webkit-backdrop-filter: blur(14px) saturate(180%);
@@ -810,6 +810,12 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
   left: 150%;
   opacity: 1;
   transition: left 0.65s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.25s ease;
+}
+
+/* Keep button feedback immediate and understated. */
+.btn::before, .btn-liquid-glass::before, .liquid-glass-shine,
+.btn::after, .btn-liquid-glass::after {
+  display: none;
 }
 
 .btn:active, .btn-liquid-glass:active {
@@ -1041,7 +1047,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .hero-main-card {
   grid-column: span 4;
   grid-row: span 2;
-  background: linear-gradient(135deg, #ecfdf5 0%, #f0fdf4 60%, #e6fffa 100%);
+  background: #ecfdf5;
   border: 1px solid #d1fae5;
   border-radius: var(--radius-2xl);
   padding: 2.75rem 2.5rem;
@@ -1054,7 +1060,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 }
 
 .dark .hero-main-card {
-  background: linear-gradient(135deg, #121215 0%, #161619 60%, #19191d 100%);
+  background: #161619;
   border-color: rgba(255, 255, 255, 0.09);
   box-shadow: 0 12px 36px -8px rgba(0, 0, 0, 0.7);
 }
@@ -1481,6 +1487,33 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .category-emoji {
   font-size: 2rem;
   filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.1));
+}
+
+.category-icon {
+  color: var(--primary);
+  margin-bottom: 0.35rem;
+}
+
+.query-chip { border-radius: var(--radius-sm); }
+
+.legal-page {
+  max-width: 860px;
+  padding-top: 3rem;
+  padding-bottom: 5rem;
+}
+
+.legal-back { margin-bottom: 2rem; }
+.legal-eyebrow { color: var(--primary); font-size: 0.78rem; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; }
+.legal-page h1 { margin: 0.4rem 0 0.8rem; font-size: clamp(2rem, 5vw, 3rem); }
+.legal-intro { max-width: 680px; color: var(--text-secondary); font-size: 1.05rem; line-height: 1.7; }
+.legal-sections { display: grid; gap: 1.4rem; margin-top: 2rem; }
+.legal-sections section { padding: 1.2rem 1.35rem; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-md); }
+.legal-sections h2 { margin: 0 0 0.45rem; font-size: 1.05rem; }
+.legal-sections p, .legal-note { margin: 0; color: var(--text-muted); line-height: 1.7; }
+.legal-note { margin-top: 1.5rem; font-size: 0.9rem; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { scroll-behavior: auto !important; animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
 }
 
 .category-name {

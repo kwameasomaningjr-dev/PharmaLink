@@ -535,7 +535,13 @@ v1Router.get('/prescriptions/:id/file', authenticateJwt, async (req: Request, re
       req.user!.role,
       req.pharmacyId
     );
-    return res.sendFile(file.filePath, { headers: { 'Content-Type': file.mimeType, 'Content-Disposition': 'inline' } });
+    res.set({
+      'Content-Type': file.mimeType,
+      'Content-Disposition': 'inline',
+      'Cache-Control': 'private, no-store',
+      'X-Content-Type-Options': 'nosniff',
+    });
+    return res.send(file.buffer);
   } catch (err) {
     next(err);
   }
@@ -620,15 +626,19 @@ v1Router.get('/pharmacy/compliance-documents', authenticateJwt, requirePharmacyA
  */
 v1Router.get('/compliance-documents/:id/file', authenticateJwt, async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { filePath, mimeType } = await ComplianceService.streamDocumentFile(
+    const { buffer, mimeType } = await ComplianceService.streamDocumentFile(
       req.params.id,
       req.user!.id,
       req.user!.role,
       req.pharmacyId
     );
-    return res.sendFile(filePath, {
-      headers: { 'Content-Type': mimeType, 'Content-Disposition': 'inline' },
+    res.set({
+      'Content-Type': mimeType,
+      'Content-Disposition': 'inline',
+      'Cache-Control': 'private, no-store',
+      'X-Content-Type-Options': 'nosniff',
     });
+    return res.send(buffer);
   } catch (err) { next(err); }
 });
 

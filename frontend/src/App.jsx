@@ -11,6 +11,14 @@ import { PrescriptionWorkspaceModal } from './components/PrescriptionWorkspaceMo
 import { BatchExpiryTracker } from './components/BatchExpiryTracker';
 import { PlatformAnalyticsHeatmap } from './components/PlatformAnalyticsHeatmap';
 import { CustomerOrdersModal } from './components/CustomerOrdersModal';
+import { Icon } from './components/common/Icon';
+import { MedicineCatalogPage } from './pages/MedicineCatalogPage';
+import { PharmaciesPage } from './pages/PharmaciesPage';
+import { HowItWorksPage } from './pages/HowItWorksPage';
+import { PrescriptionsPage } from './pages/PrescriptionsPage';
+import { PlatformOperationsDashboard } from './pages/PlatformOperationsPage';
+import { PharmacySettingsPage } from './pages/PharmacySettingsPage';
+import { LegalPage } from './pages/LegalPage';
 
 class ErrorBoundary extends Component {
   constructor(props) {
@@ -87,6 +95,8 @@ const pagePaths = {
   pharmacies: '/pharmacies',
   prescriptions: '/prescriptions',
   howItWorks: '/how-it-works',
+  terms: '/terms',
+  privacy: '/privacy',
 };
 
 function pageFromPath(pathname) {
@@ -103,1109 +113,8 @@ function adminPageFromPath(pathname, portal) {
   return portal === 'platform' ? 'network' : 'overview';
 }
 
-function HeroHeadlineReveal({ text }) {
-  const words = text.split(" ");
-  return (
-    <h1 className="hero-heading">
-      {words.map((word, i) => {
-        const isHighlight = word.toLowerCase().includes("pharmacy") || word.toLowerCase().includes("closest") || word.toLowerCase().includes("you");
-        return (
-          <span key={i} className="hero-reveal-word-wrap">
-            <span className={`hero-reveal-word-bg ${isHighlight ? 'is-highlight' : ''}`}>{word}</span>
-            <motion.span
-              initial={{ opacity: 0, y: 10, filter: 'blur(6px)' }}
-              animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
-              transition={{
-                duration: 0.75,
-                delay: 0.25 + i * 0.22,
-                ease: [0.25, 0.1, 0.25, 1.0],
-              }}
-              className={`hero-reveal-word-fg ${isHighlight ? 'is-highlight' : ''}`}
-            >
-              {word}
-            </motion.span>
-          </span>
-        );
-      })}
-    </h1>
-  );
-}
+// Page and Hero components extracted to ./pages/ and ./components/common/
 
-/* ==========================================================================
-   Page: Medicine Catalog
-   ========================================================================== */
-function MedicineCatalogPage({
-  searchResults,
-  searchQuery,
-  setSearchQuery,
-  onSearch,
-  onAddToCart,
-  onViewDetails,
-  location,
-  isSearching,
-  cartItems = [],
-  selectedPharmacyFilter = null,
-  onClearPharmacyFilter,
-  onUploadRx,
-}) {
-  const catalog = Array.from(searchResults.reduce((medicineMap, item) => {
-    // If pharmacy filter is active, only include items belonging to that pharmacy
-    if (selectedPharmacyFilter && item.pharmacy?.id !== selectedPharmacyFilter.id) {
-      return medicineMap;
-    }
-    const medicineId = item.medicine.id;
-    const current = medicineMap.get(medicineId) || {
-      medicine: item.medicine,
-      pharmacies: [],
-      lowestPrice: Number.POSITIVE_INFINITY,
-    };
-    current.pharmacies.push(item);
-    current.lowestPrice = Math.min(current.lowestPrice, Number(item.price.unit_price_minor || 0));
-    medicineMap.set(medicineId, current);
-    return medicineMap;
-  }, new Map()).values());
-
-  const categoryFilters = [
-    { label: 'All medicines', query: '' },
-    { label: 'Pain relief', query: 'Paracetamol' },
-    { label: 'Antibiotics', query: 'Amoxicillin' },
-    { label: 'Antimalarials', query: 'Coartem' },
-    { label: 'Vitamins & Minerals', query: 'Vitamin' },
-    { label: 'Baby & Child care', query: 'Calpol' },
-    { label: 'Allergy care', query: 'Cetirizine' },
-  ];
-
-  return (
-    <div className="catalog-page">
-      <section className="catalog-hero container-page">
-        <span className="hero-pill"><span className="hero-dot"></span> Ghana's Verified Medicine Network</span>
-        <h1 className="catalog-title">
-          {selectedPharmacyFilter ? `Available stock at ${selectedPharmacyFilter.display_name}` : 'Find trusted medicines near you.'}
-        </h1>
-        <p className="catalog-subtitle">
-          {selectedPharmacyFilter 
-            ? `Live verified dispensary stock for ${selectedPharmacyFilter.display_name} in ${selectedPharmacyFilter.city || 'Ghana'}.`
-            : 'Compare live dispensary stock, transparent Cedi pricing, and verified partner pharmacies across Ghana.'}
-        </p>
-        
-        <form className="catalog-search" onSubmit={(event) => { event.preventDefault(); onSearch(searchQuery); }}>
-          <span aria-hidden="true" style={{ fontSize: '1.2rem', marginLeft: '0.4rem', color: 'var(--text-muted)' }}>🔍</span>
-          <input
-            value={searchQuery}
-            onChange={(event) => setSearchQuery(event.target.value)}
-            placeholder={selectedPharmacyFilter ? `Search medicines in ${selectedPharmacyFilter.display_name}...` : "Search by generic name, brand name, or symptom (e.g., Paracetamol, Amoxicillin)..."}
-            aria-label="Search medicines"
-          />
-          <button type="submit" className="btn btn-primary">{isSearching ? 'Searching...' : 'Search'}</button>
-        </form>
-      </section>
-
-      <section className="container-page catalog-content">
-        {selectedPharmacyFilter && (
-          <div style={{
-            background: 'var(--surface)',
-            border: '1px solid var(--border)',
-            borderRadius: 'var(--radius-xl)',
-            padding: '1.15rem 1.5rem',
-            marginBottom: '1.75rem',
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            flexWrap: 'wrap',
-            gap: '1rem',
-            boxShadow: 'var(--shadow-sm)'
-          }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem' }}>
-              <div style={{ fontSize: '1.75rem', background: 'var(--card-alt)', padding: '0.5rem', borderRadius: 'var(--radius-md)' }}>🏥</div>
-              <div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
-                  <h3 style={{ fontSize: '1.15rem', fontWeight: 800, margin: 0 }}>
-                    {selectedPharmacyFilter.display_name}
-                  </h3>
-                  <span className="badge badge-verified">✓ FDA Verified</span>
-                </div>
-                <p style={{ fontSize: '0.84rem', color: 'var(--text-muted)', margin: '0.2rem 0 0 0' }}>
-                  📍 {selectedPharmacyFilter.address_line}, {selectedPharmacyFilter.city} {selectedPharmacyFilter.region ? `(${selectedPharmacyFilter.region})` : ''}
-                  {selectedPharmacyFilter.phone ? ` • 📞 ${selectedPharmacyFilter.phone}` : ''}
-                  {selectedPharmacyFilter.license_number ? ` • License: ${selectedPharmacyFilter.license_number}` : ''}
-                </p>
-              </div>
-            </div>
-            <button
-              type="button"
-              className="btn btn-outline btn-sm"
-              onClick={onClearPharmacyFilter}
-            >
-              ✕ Browse all pharmacies
-            </button>
-          </div>
-        )}
-
-        <div className="catalog-heading-row">
-          <div>
-            <h2 className="section-title">
-              {selectedPharmacyFilter ? `${selectedPharmacyFilter.display_name} Stock` : 'Available Medicines'}
-            </h2>
-            <p className="section-sub">
-              {selectedPharmacyFilter
-                ? `Showing verified stock at ${selectedPharmacyFilter.display_name}.`
-                : `Showing verified dispensary inventory near ${location.name}.`}
-            </p>
-          </div>
-          <div className="catalog-heading-actions">
-            {!selectedPharmacyFilter && (
-              <label className="catalog-filter-control">
-                <span>Category</span>
-                <select
-                  value={searchQuery}
-                  onChange={(event) => {
-                    setSearchQuery(event.target.value);
-                    onSearch(event.target.value);
-                  }}
-                  aria-label="Filter medicines by category"
-                >
-                  {categoryFilters.map((filter) => (
-                    <option value={filter.query} key={filter.label}>{filter.label}</option>
-                  ))}
-                </select>
-              </label>
-            )}
-            <span className="catalog-result-count">{catalog.length} {catalog.length === 1 ? 'medicine' : 'medicines'} found</span>
-          </div>
-        </div>
-
-        {catalog.length === 0 ? (
-          selectedPharmacyFilter ? (
-            <div className="empty-state">
-              <div className="empty-state-icon">🏥</div>
-              <h3>No available stock in {selectedPharmacyFilter.display_name}</h3>
-              <p>
-                This dispensary is an accredited partner on PharmaLink but currently has no inventory in stock matching your search.
-              </p>
-              <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'center', marginTop: '1.25rem', flexWrap: 'wrap' }}>
-                <button
-                  type="button"
-                  className="btn btn-primary"
-                  onClick={onClearPharmacyFilter}
-                >
-                  Browse all pharmacies
-                </button>
-                <button
-                  type="button"
-                  className="btn btn-secondary"
-                  onClick={() => onUploadRx && onUploadRx(selectedPharmacyFilter)}
-                >
-                  📄 Upload Doctor's Prescription
-                </button>
-              </div>
-            </div>
-          ) : (
-            <div className="empty-state">
-              <div className="empty-state-icon">🔎</div>
-              <h3>No medicines found</h3>
-              <p>Try searching for another generic name, brand, or broad symptom category.</p>
-            </div>
-          )
-        ) : (
-          <div className="catalog-grid">
-            {catalog.map((entry) => {
-              const bestOption = entry.pharmacies[0];
-              const requiresPrescription = entry.medicine.prescription_required;
-              const inCartQty = cartItems.find((i) =>
-                i.medicine.id === entry.medicine.id
-                && i.pharmacy_id === bestOption.pharmacy.id
-              )?.quantity || 0;
-
-              return (
-                <article className="catalog-card" key={entry.medicine.id}>
-                  <div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.5rem', marginBottom: '0.65rem' }}>
-                      <span className={`badge ${bestOption.availability_state === 'VERIFIED' ? 'badge-verified' : bestOption.availability_state === 'LIKELY' ? 'badge-likely' : 'badge-uncertain'}`}>
-                        {bestOption.availability_state === 'VERIFIED' ? '✓ Verified' : '⚡ Likely'}
-                      </span>
-                      <span className={`badge ${requiresPrescription ? 'badge-rx' : 'badge-otc'}`}>
-                        {requiresPrescription ? 'Rx Required' : 'OTC'}
-                      </span>
-                    </div>
-
-                    <h3 className="product-card-title">{entry.medicine.generic_name}</h3>
-                    <p className="product-card-generic">{entry.medicine.brand_name || 'Generic'} · {entry.medicine.formulation}</p>
-                    
-                    <p className="catalog-strength">
-                      {entry.medicine.strength_value || ''}{entry.medicine.strength_unit || ''}
-                      {entry.medicine.pack_size ? ` · Pack of ${entry.medicine.pack_size} ${entry.medicine.pack_unit || ''}` : ''}
-                    </p>
-
-                    <div className="pharmacy-match-pill">
-                      <div className="name">🏥 {bestOption.pharmacy.display_name}</div>
-                      <div className="meta">
-                        <span>📍 {bestOption.distance_km?.toFixed(1) || '—'} km away</span> · <span>🕒 {bestOption.freshness}</span>
-                      </div>
-                      <div style={{ fontSize: '0.75rem', color: 'var(--primary)', fontWeight: 700, marginTop: '3px' }}>
-                        ● {bestOption.customer_status || (bestOption.availability_state === 'VERIFIED' ? 'Verified in stock' : 'Likely in stock')}
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="catalog-card-footer">
-                    <div>
-                      <div style={{ fontSize: '0.72rem', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-muted)', fontWeight: 700 }}>Starting from</div>
-                      <div className="price-tag">GHS {(entry.lowestPrice / 100).toFixed(2)}</div>
-                    </div>
-                    <div style={{ display: 'flex', gap: '0.4rem' }}>
-                      <button
-                        type="button"
-                        className="btn btn-secondary btn-sm"
-                        onClick={() => onViewDetails && onViewDetails(entry)}
-                        title="View clinical info, dosage calculator, and generic alternatives"
-                      >
-                        🧮 Dosage & Alt
-                      </button>
-                      <button
-                        type="button"
-                        className={`btn ${inCartQty > 0 ? 'btn-secondary' : 'btn-primary'} btn-sm`}
-                        onClick={() => onAddToCart(bestOption)}
-                      >
-                        {inCartQty > 0 ? `In Cart (${inCartQty}) +` : '+ Add'}
-                      </button>
-                    </div>
-                  </div>
-                </article>
-              );
-            })}
-          </div>
-        )}
-      </section>
-    </div>
-  );
-}
-
-/* ==========================================================================
-   Page: Pharmacies Directory
-   ========================================================================== */
-function PharmaciesPage({
-  pharmacies = [],
-  isLoading = false,
-  location,
-  onBrowseMedicines,
-  onBrowsePharmacyStock,
-  onRefresh,
-}) {
-  const [pharmacySearch, setPharmacySearch] = useState('');
-  const [selectedRegion, setSelectedRegion] = useState('ALL');
-  const [selectedFulfillment, setSelectedFulfillment] = useState('ALL'); // 'ALL' | 'PICKUP' | 'DELIVERY'
-
-  // Extract unique available regions
-  const availableRegions = useMemo(() => {
-    const set = new Set(['ALL']);
-    pharmacies.forEach((p) => {
-      const reg = p.region || p.city;
-      if (reg) set.add(reg);
-    });
-    return Array.from(set);
-  }, [pharmacies]);
-
-  const filteredPharmacies = useMemo(() => {
-    return pharmacies.filter((p) => {
-      const q = pharmacySearch.trim().toLowerCase();
-      const matchesSearch = !q ||
-        p.display_name?.toLowerCase().includes(q) ||
-        p.legal_name?.toLowerCase().includes(q) ||
-        p.address_line?.toLowerCase().includes(q) ||
-        p.city?.toLowerCase().includes(q) ||
-        p.region?.toLowerCase().includes(q) ||
-        p.license_number?.toLowerCase().includes(q);
-
-      const matchesRegion = selectedRegion === 'ALL' ||
-        p.region?.toLowerCase() === selectedRegion.toLowerCase() ||
-        p.city?.toLowerCase() === selectedRegion.toLowerCase();
-
-      const fulfillment = p.fulfillment_options || {};
-      const matchesFulfillment = selectedFulfillment === 'ALL' ||
-        (selectedFulfillment === 'PICKUP' && fulfillment.pickup !== false) ||
-        (selectedFulfillment === 'DELIVERY' && fulfillment.delivery === true);
-
-      return matchesSearch && matchesRegion && matchesFulfillment;
-    });
-  }, [pharmacies, pharmacySearch, selectedRegion, selectedFulfillment]);
-
-  return (
-    <div className="catalog-page">
-      <section className="catalog-hero container-page">
-        <span className="hero-pill"><span className="hero-dot"></span> Licensed Pharmacy Partners</span>
-        <h1 className="catalog-title">Verified Pharmacies near {location.name}.</h1>
-        <p className="catalog-subtitle">
-          Every dispensary on PharmaLink is licensed by Ghana's Pharmacy Council and verified by platform operations with live stock signals and fulfillment coverage.
-        </p>
-      </section>
-
-      {/* Live Interactive Pharmacy Radar Map */}
-      <section className="container-page">
-        <PharmacyRadarMap
-          pharmacies={filteredPharmacies.length > 0 ? filteredPharmacies : pharmacies}
-          currentLocation={location}
-          onSelectPharmacy={onBrowsePharmacyStock}
-          onBrowseMedicines={onBrowseMedicines}
-        />
-      </section>
-
-      {/* Filters and Search Bar */}
-      <section className="container-page" style={{ marginTop: '2rem' }}>
-        <div style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          flexWrap: 'wrap',
-          gap: '1rem',
-          background: 'var(--surface)',
-          padding: '1.25rem 1.5rem',
-          borderRadius: 'var(--radius-xl)',
-          border: '1px solid var(--border)',
-          marginBottom: '1.5rem'
-        }}>
-          <div style={{ flex: '1 1 280px', display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-            <span style={{ fontSize: '1.2rem', color: 'var(--text-muted)' }}>🔍</span>
-            <input
-              type="text"
-              className="hero-search-input"
-              style={{ padding: '0.6rem 0.8rem', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)', background: 'var(--card)', width: '100%' }}
-              placeholder="Search pharmacy name, city, address, or license #..."
-              value={pharmacySearch}
-              onChange={(e) => setPharmacySearch(e.target.value)}
-            />
-          </div>
-
-          <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
-            <div style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap' }}>
-              {availableRegions.slice(0, 5).map((reg) => (
-                <button
-                  key={reg}
-                  type="button"
-                  className={`btn btn-sm ${selectedRegion === reg ? 'btn-primary' : 'btn-secondary'}`}
-                  style={{ fontSize: '0.76rem', padding: '0.35rem 0.7rem' }}
-                  onClick={() => setSelectedRegion(reg)}
-                >
-                  {reg === 'ALL' ? 'All Regions' : reg}
-                </button>
-              ))}
-            </div>
-
-            <div style={{ display: 'flex', gap: '0.35rem' }}>
-              <button
-                type="button"
-                className={`btn btn-sm ${selectedFulfillment === 'ALL' ? 'btn-outline' : 'btn-secondary'}`}
-                style={{ fontSize: '0.76rem' }}
-                onClick={() => setSelectedFulfillment('ALL')}
-              >
-                All
-              </button>
-              <button
-                type="button"
-                className={`btn btn-sm ${selectedFulfillment === 'DELIVERY' ? 'btn-primary' : 'btn-secondary'}`}
-                style={{ fontSize: '0.76rem' }}
-                onClick={() => setSelectedFulfillment('DELIVERY')}
-              >
-                🚚 Delivery
-              </button>
-              <button
-                type="button"
-                className={`btn btn-sm ${selectedFulfillment === 'PICKUP' ? 'btn-primary' : 'btn-secondary'}`}
-                style={{ fontSize: '0.76rem' }}
-                onClick={() => setSelectedFulfillment('PICKUP')}
-              >
-                📦 Pickup
-              </button>
-            </div>
-
-            {onRefresh && (
-              <button
-                type="button"
-                className="btn btn-secondary btn-sm"
-                onClick={onRefresh}
-                title="Refresh verified pharmacies list"
-                style={{ fontSize: '0.76rem' }}
-              >
-                ↻ Refresh
-              </button>
-            )}
-          </div>
-        </div>
-
-        {/* Directory Grid */}
-        {isLoading ? (
-          <div className="empty-state">
-            <div className="empty-state-icon">⏳</div>
-            <h3>Loading verified pharmacies...</h3>
-            <p>Fetching licensed dispensary network in Ghana.</p>
-          </div>
-        ) : filteredPharmacies.length === 0 ? (
-          <div className="empty-state">
-            <div className="empty-state-icon">🏥</div>
-            <h3>No verified pharmacies found</h3>
-            <p>
-              {pharmacySearch || selectedRegion !== 'ALL' || selectedFulfillment !== 'ALL'
-                ? 'No dispensary matches your filter criteria. Try resetting filters.'
-                : 'No pharmacies currently approved in this area. Once platform operations verifies a pharmacy, it will appear here immediately.'}
-            </p>
-            <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'center', marginTop: '1rem' }}>
-              {(pharmacySearch || selectedRegion !== 'ALL' || selectedFulfillment !== 'ALL') && (
-                <button
-                  type="button"
-                  className="btn btn-secondary"
-                  onClick={() => {
-                    setPharmacySearch('');
-                    setSelectedRegion('ALL');
-                    setSelectedFulfillment('ALL');
-                  }}
-                >
-                  Reset Filters
-                </button>
-              )}
-              <button type="button" className="btn btn-primary" onClick={onBrowseMedicines}>
-                Browse Medicines
-              </button>
-            </div>
-          </div>
-        ) : (
-          <div className="pharmacy-directory-grid">
-            {filteredPharmacies.map((item) => {
-              const fulfillment = item.fulfillment_options || {};
-              const hours = item.opening_hours || {};
-              return (
-                <article className="pharmacy-directory-card" key={item.id}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.5rem' }}>
-                    <div className="pharmacy-directory-icon">🏥</div>
-                    <span className="badge badge-verified">✓ FDA Verified</span>
-                  </div>
-                  <div>
-                    <h2 style={{ fontSize: '1.25rem', fontWeight: 800 }}>{item.display_name}</h2>
-                    {item.legal_name && item.legal_name !== item.display_name && (
-                      <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', fontStyle: 'italic' }}>
-                        {item.legal_name}
-                      </p>
-                    )}
-                    <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginTop: '0.35rem' }}>
-                      📍 {item.address_line}, {item.city} {item.region ? `(${item.region})` : ''}
-                    </p>
-                    {item.phone && (
-                      <p style={{ fontSize: '0.82rem', color: 'var(--primary)', fontWeight: 600, marginTop: '0.2rem' }}>
-                        📞 {item.phone}
-                      </p>
-                    )}
-                  </div>
-                  <div className="pharmacy-directory-meta">
-                    <span>📍 {item.distance_km !== null && item.distance_km !== undefined ? `${Number(item.distance_km).toFixed(1)} km away` : `Near ${location.name}`}</span>
-                    <span>🕒 {hours.mon_fri || 'Mon-Sat: 08:00 - 20:00'}</span>
-                  </div>
-                  <div className="pharmacy-directory-meta">
-                    <span>📦 Pickup {fulfillment.pickup !== false ? 'Available' : 'Unavailable'}</span>
-                    <span>🚚 Delivery {fulfillment.delivery ? 'Available' : 'Unavailable'}</span>
-                  </div>
-                  {item.license_number && (
-                    <div style={{ fontSize: '0.74rem', color: 'var(--text-muted)', background: 'var(--surface)', padding: '0.3rem 0.5rem', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)' }}>
-                      🛡️ License: <strong>{item.license_number}</strong>
-                    </div>
-                  )}
-                  <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.5rem' }}>
-                    <button
-                      type="button"
-                      className="btn btn-outline btn-sm"
-                      style={{ flex: 1 }}
-                      onClick={() => {
-                        if (onBrowsePharmacyStock) {
-                          onBrowsePharmacyStock(item);
-                        } else {
-                          onBrowseMedicines();
-                        }
-                      }}
-                    >
-                      Browse available stock →
-                    </button>
-                  </div>
-                </article>
-              );
-            })}
-          </div>
-        )}
-      </section>
-    </div>
-  );
-}
-
-
-/* ==========================================================================
-   Page: How It Works
-   ========================================================================== */
-function HowItWorksPage({ onBrowseMedicines }) {
-  const steps = [
-    ['01', 'Search or Upload Rx', 'Find any medicine by generic name, brand, or symptom. For prescription drugs, easily attach a photo during checkout.', '🔍'],
-    ['02', 'We Match Real-time Stock', 'PharmaLink ranks verified pharmacies by GPS proximity, stock confidence, freshness, and delivery availability.', '📍'],
-    ['03', 'Choose Pickup or Delivery', 'Collect your order at the dispensary counter in minutes or receive safe doorstep delivery directly to your home.', '🚚'],
-  ];
-
-  return (
-    <div className="catalog-page">
-      <section className="catalog-hero container-page">
-        <span className="hero-pill"><span className="hero-dot"></span> Simple, Transparent, Ghana-first</span>
-        <h1 className="catalog-title">From search to dispensary in three steps.</h1>
-        <p className="catalog-subtitle">Never walk from chemist to chemist in the heat again. Check availability instantly from verified pharmacies across Ghana.</p>
-      </section>
-      
-      <section className="container-page steps-page-grid">
-        {steps.map(([number, title, description, emoji]) => (
-          <article className="step-card" key={number}>
-            <div className="step-icon-wrapper">
-              <div className="step-icon">{emoji}</div>
-              <div className="step-badge">Step {number}</div>
-            </div>
-            <h2 style={{ fontSize: '1.25rem', fontWeight: 800, marginTop: '1.25rem' }}>{title}</h2>
-            <p style={{ fontSize: '0.9rem', color: 'var(--text-muted)', marginTop: '0.5rem', lineHeight: 1.6 }}>{description}</p>
-          </article>
-        ))}
-      </section>
-
-      <section className="container-page trust-banner">
-        <div className="trust-item">
-          <div className="trust-icon">🛡️</div>
-          <div>
-            <h4 style={{ fontWeight: 800, fontSize: '1.05rem' }}>Licensed by Pharmacy Council</h4>
-            <p style={{ fontSize: '0.88rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>Every partner pharmacy is accredited and regulated in Ghana.</p>
-          </div>
-        </div>
-        <div className="trust-item">
-          <div className="trust-icon">⚡</div>
-          <div>
-            <h4 style={{ fontWeight: 800, fontSize: '1.05rem' }}>Verified Stock Signals</h4>
-            <p style={{ fontSize: '0.88rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>Clear indicators showing confirmed physical shelf count vs likely stock.</p>
-          </div>
-        </div>
-        <div className="trust-item">
-          <div className="trust-icon">🔒</div>
-          <div>
-            <h4 style={{ fontWeight: 800, fontSize: '1.05rem' }}>Private Pharmacist Review</h4>
-            <p style={{ fontSize: '0.88rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>Prescriptions are encrypted and reviewed only by licensed dispensing staff.</p>
-          </div>
-        </div>
-      </section>
-    </div>
-  );
-}
-
-/* ==========================================================================
-   Page: Prescriptions Page (Interactive Rx Upload & Consultation)
-   ========================================================================== */
-function PrescriptionsPage({ currentUser, currentToken, searchResults, verifiedPharmacies = [], location, onBrowseMedicines, onSignIn, showToast, onOrderCreated }) {
-  const [selectedPharmacyId, setSelectedPharmacyId] = useState('');
-  const [rxNotes, setRxNotes] = useState('');
-  const [fulfillmentType, setFulfillmentType] = useState('PICKUP');
-  const [deliveryAddress, setDeliveryAddress] = useState(location?.name || 'East Legon, Accra, Ghana');
-  const [rxFile, setRxFile] = useState(null);
-  const [isSubmitting, setIsSubmitting] = useState(false);
-
-  // Extract unique pharmacies from verifiedPharmacies or searchResults
-  const pharmacies = useMemo(() => {
-    if (verifiedPharmacies && verifiedPharmacies.length > 0) {
-      return verifiedPharmacies;
-    }
-    return Array.from(
-      (searchResults || []).reduce((pharmacyMap, item) => {
-        if (item.pharmacy && !pharmacyMap.has(item.pharmacy.id)) {
-          pharmacyMap.set(item.pharmacy.id, item.pharmacy);
-        }
-        return pharmacyMap;
-      }, new Map()).values()
-    );
-  }, [verifiedPharmacies, searchResults]);
-
-  const handleRxFileSelect = (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    if (file.size > 5 * 1024 * 1024) {
-      if (showToast) showToast('Prescription files must be 5 MB or smaller.', 'error');
-      return;
-    }
-    const validExtensions = ['application/pdf', 'image/jpeg', 'image/png', 'image/jpg'];
-    if (!validExtensions.includes(file.type) && !/\.(pdf|jpe?g|png)$/i.test(file.name)) {
-      if (showToast) showToast('Upload a PDF, JPG, or PNG prescription.', 'error');
-      return;
-    }
-    setRxFile(file);
-    if (showToast) showToast(`Prescription "${file.name}" attached successfully!`, 'success');
-  };
-
-  const handleSubmitRx = async (e) => {
-    e.preventDefault();
-    if (!currentUser) {
-      if (showToast) showToast('Please sign in or register to submit your prescription.', 'info');
-      if (onSignIn) onSignIn();
-      return;
-    }
-    if (!rxFile) {
-      if (showToast) showToast('Please attach a clear photo or PDF of your doctor prescription.', 'error');
-      return;
-    }
-    const pharmacyId = selectedPharmacyId || pharmacies[0]?.id;
-    if (!pharmacyId) {
-      if (showToast) showToast('Please select a dispensing pharmacy.', 'error');
-      return;
-    }
-
-    const pharmacyMedicines = (searchResults || []).filter((item) => item.pharmacy.id === pharmacyId);
-    const primaryMedicine = pharmacyMedicines[0]?.medicine;
-
-    if (!primaryMedicine) {
-      if (showToast) showToast('Please browse medicines first to select the specific prescription drug required.', 'info');
-      if (onBrowseMedicines) onBrowseMedicines();
-      return;
-    }
-
-    setIsSubmitting(true);
-    try {
-      const orderRes = await fetch('/v1/orders', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${currentToken}`
-        },
-        body: JSON.stringify({
-          pharmacy_id: pharmacyId,
-          fulfillment_type: fulfillmentType,
-          customer_note: rxNotes.trim() ? `[Doctor Prescription Order] ${rxNotes.trim()}` : '[Doctor Prescription Order]',
-          delivery_address: fulfillmentType === 'DELIVERY' ? deliveryAddress : undefined,
-          items: [{ medicine_id: primaryMedicine.id, quantity: 1 }]
-        })
-      });
-      const orderData = await orderRes.json();
-      if (!orderRes.ok || !orderData.data) {
-        throw new Error(orderData.error?.message || 'Could not create prescription order.');
-      }
-
-      const createdOrder = orderData.data;
-
-      const formData = new FormData();
-      formData.append('order_id', createdOrder.id);
-      formData.append('file', rxFile);
-
-      const uploadRes = await fetch('/v1/prescriptions', {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${currentToken}` },
-        body: formData
-      });
-      const uploadData = await uploadRes.json();
-      if (!uploadRes.ok || !uploadData.data) {
-        throw new Error(uploadData.error?.message || 'Order created, but prescription upload failed.');
-      }
-
-      if (showToast) showToast(`Prescription #${createdOrder.id.substring(0, 8)} uploaded for licensed pharmacist review!`, 'success');
-      setRxFile(null);
-      setRxNotes('');
-      if (onOrderCreated) onOrderCreated();
-    } catch (err) {
-      if (showToast) showToast(err.message, 'error');
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
-  return (
-    <div className="catalog-page">
-      <section className="catalog-hero container-page">
-        <span className="hero-pill"><span className="hero-dot"></span> Safe & Regulated Healthcare in Ghana</span>
-        <h1 className="catalog-title">Pharmacist-Reviewed Prescriptions</h1>
-        <p className="catalog-subtitle">
-          Upload your doctor's prescription directly or browse our licensed catalog. A certified dispensing pharmacist reviews and verifies every request before fulfillment.
-        </p>
-      </section>
-
-      {/* INTERACTIVE RX UPLOAD & CONSULTATION CARD */}
-      <section className="container-page" style={{ marginTop: '2rem' }}>
-        <div style={{
-          background: 'var(--card)',
-          border: '1.5px solid var(--border)',
-          borderRadius: 'var(--radius-2xl)',
-          padding: '2rem',
-          boxShadow: 'var(--shadow-md)',
-          maxWidth: '820px',
-          margin: '0 auto'
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem', marginBottom: '1.25rem' }}>
-            <div style={{ width: '48px', height: '48px', borderRadius: 'var(--radius-lg)', background: 'var(--badge-rx-bg)', color: 'var(--badge-rx-text)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.5rem' }}>
-              📋
-            </div>
-            <div>
-              <h2 style={{ fontSize: '1.35rem', fontWeight: 800 }}>Submit Doctor Prescription</h2>
-              <p style={{ fontSize: '0.86rem', color: 'var(--text-muted)' }}>
-                Directly transmit your prescription to a verified Ghana pharmacy for dispensing.
-              </p>
-            </div>
-          </div>
-
-          <form onSubmit={handleSubmitRx}>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '1.25rem' }}>
-              <div className="form-group">
-                <label className="form-label">Select Dispensing Pharmacy</label>
-                <select
-                  className="form-select"
-                  value={selectedPharmacyId || (pharmacies[0]?.id || '')}
-                  onChange={(e) => setSelectedPharmacyId(e.target.value)}
-                >
-                  {pharmacies.length > 0 ? (
-                    pharmacies.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.display_name} ({p.city || location?.name || 'Accra'})
-                      </option>
-                    ))
-                  ) : (
-                    <option value="">Airport Residential Pharmacy (Accra)</option>
-                  )}
-                </select>
-              </div>
-
-              <div className="form-group">
-                <label className="form-label">Fulfillment Option</label>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.65rem' }}>
-                  <button
-                    type="button"
-                    className={`btn ${fulfillmentType === 'PICKUP' ? 'btn-primary' : 'btn-outline'}`}
-                    style={{ padding: '0.65rem', fontSize: '0.85rem' }}
-                    onClick={() => setFulfillmentType('PICKUP')}
-                  >
-                    🏥 Counter Pickup
-                  </button>
-                  <button
-                    type="button"
-                    className={`btn ${fulfillmentType === 'DELIVERY' ? 'btn-primary' : 'btn-outline'}`}
-                    style={{ padding: '0.65rem', fontSize: '0.85rem' }}
-                    onClick={() => setFulfillmentType('DELIVERY')}
-                  >
-                    🚚 Courier Delivery
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            {fulfillmentType === 'DELIVERY' && (
-              <div className="form-group" style={{ marginTop: '0.5rem' }}>
-                <label className="form-label">Delivery Address in Ghana</label>
-                <input
-                  type="text"
-                  className="form-input"
-                  value={deliveryAddress}
-                  onChange={(e) => setDeliveryAddress(e.target.value)}
-                  placeholder="e.g. House 24, Lagos Avenue, East Legon, Accra"
-                  required
-                />
-              </div>
-            )}
-
-            <div className="form-group" style={{ marginTop: '0.5rem' }}>
-              <label className="form-label">Doctor's Instructions or Medication Names (Optional)</label>
-              <textarea
-                className="form-textarea"
-                rows="2"
-                value={rxNotes}
-                onChange={(e) => setRxNotes(e.target.value)}
-                placeholder="e.g. Amoxicillin 500mg capsules 3x daily as prescribed by Dr. Mensah..."
-              />
-            </div>
-
-            <div className="form-group" style={{
-              marginTop: '1rem',
-              border: '2px dashed var(--border)',
-              borderRadius: 'var(--radius-xl)',
-              padding: '1.5rem',
-              textAlign: 'center',
-              background: 'var(--card-alt)'
-            }}>
-              <div style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>📸</div>
-              <label className="form-label" style={{ fontSize: '1rem', fontWeight: 800, marginBottom: '0.25rem', cursor: 'pointer' }}>
-                {rxFile ? rxFile.name : 'Click to Upload Prescription File'}
-              </label>
-              <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', marginBottom: '0.85rem' }}>
-                Clear camera photo or document (PDF, JPG, PNG up to 5 MB)
-              </p>
-              <input
-                type="file"
-                id="rx-direct-upload"
-                style={{ display: 'none' }}
-                accept="application/pdf,image/jpeg,image/png,image/jpg"
-                onChange={handleRxFileSelect}
-              />
-              <label htmlFor="rx-direct-upload" className="btn btn-secondary btn-sm" style={{ cursor: 'pointer', display: 'inline-flex' }}>
-                {rxFile ? '✓ Change File' : 'Browse / Snap Photo'}
-              </label>
-            </div>
-
-            <div style={{ display: 'flex', gap: '1rem', marginTop: '1.5rem', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between' }}>
-              <button
-                type="button"
-                className="btn btn-outline"
-                onClick={onBrowseMedicines}
-              >
-                🔍 Browse All Medicines
-              </button>
-
-              <button
-                type="submit"
-                className="btn btn-primary"
-                style={{ padding: '0.85rem 1.8rem', fontWeight: 800 }}
-                disabled={isSubmitting}
-              >
-                {isSubmitting ? 'Uploading & Submitting...' : 'Submit to Pharmacist →'}
-              </button>
-            </div>
-          </form>
-        </div>
-      </section>
-
-      {/* GUIDELINES GRID */}
-      <section className="container-page prescription-guide-grid" style={{ marginTop: '3rem' }}>
-        <article className="step-card">
-          <div className="step-icon">📄</div>
-          <h2 style={{ fontSize: '1.2rem', fontWeight: 800, marginTop: '1rem' }}>Accepted formats</h2>
-          <p style={{ fontSize: '0.9rem', color: 'var(--text-muted)', marginTop: '0.4rem', lineHeight: 1.5 }}>
-            Upload clean PDF, JPG, or PNG files up to 5 MB with the doctor's stamp and date clearly visible.
-          </p>
-        </article>
-
-        <article className="step-card">
-          <div className="step-icon">🔒</div>
-          <h2 style={{ fontSize: '1.2rem', fontWeight: 800, marginTop: '1rem' }}>Strict Privacy Protection</h2>
-          <p style={{ fontSize: '0.9rem', color: 'var(--text-muted)', marginTop: '0.4rem', lineHeight: 1.5 }}>
-            Prescription files are stored in private secure storage, accessible only to you and the assigned licensed pharmacy.
-          </p>
-        </article>
-
-        <article className="step-card">
-          <div className="step-icon">👨‍⚕️</div>
-          <h2 style={{ fontSize: '1.2rem', fontWeight: 800, marginTop: '1rem' }}>Pharmacist Decision</h2>
-          <p style={{ fontSize: '0.9rem', color: 'var(--text-muted)', marginTop: '0.4rem', lineHeight: 1.5 }}>
-            The pharmacist approves, requests clarification, or rejects before any payment or physical dispensing occurs.
-          </p>
-        </article>
-      </section>
-    </div>
-  );
-}
-
-/* ==========================================================================
-   Page: Platform Operations Dashboard
-   ========================================================================== */
-function PlatformOperationsDashboard({ pharmacies, auditEvents, isLoading, activeFilter, setActiveFilter, onRefresh, onVerificationChange, activePage }) {
-  const counts = pharmacies.reduce((summary, pharmacy) => {
-    summary.total += 1;
-    summary[pharmacy.verification_status] = (summary[pharmacy.verification_status] || 0) + 1;
-    return summary;
-  }, { total: 0, PENDING: 0, VERIFIED: 0, REJECTED: 0, SUSPENDED: 0 });
-
-  const isVerificationPage = activePage === 'verification';
-  const isAnalyticsPage = activePage === 'analytics';
-  const isAuditPage = activePage === 'audit';
-  const effectiveFilter = isVerificationPage ? 'PENDING' : activeFilter;
-  const visiblePharmacies = effectiveFilter === 'ALL'
-    ? pharmacies
-    : pharmacies.filter((pharmacy) => pharmacy.verification_status === effectiveFilter);
-  const pageTitle = isVerificationPage ? 'Verification queue'
-    : isAnalyticsPage ? 'Network analytics'
-      : isAuditPage ? 'Audit activity'
-        : 'Pharmacy network';
-
-  return (
-    <div className="admin-page">
-      <div className="admin-page-header">
-        <div>
-          <span className="admin-eyebrow">🛡️ PLATFORM OPERATIONS</span>
-          <h1>{pageTitle}</h1>
-          <p>
-            {isVerificationPage
-              ? 'Review pending pharmacy applications and make auditable onboarding decisions.'
-              : isAnalyticsPage
-                ? 'Monitor pharmacy coverage, onboarding throughput, and network health.'
-                : isAuditPage
-                  ? 'Review recent onboarding and administrative activity across the platform.'
-                  : 'Manage every pharmacy onboarded to PharmaLink, review verification status, and monitor network health.'}
-          </p>
-        </div>
-        <button type="button" className="btn btn-outline btn-sm" onClick={onRefresh}>↻ Refresh data</button>
-      </div>
-
-      <div className="admin-stat-grid">
-        <div className="admin-stat-card"><span>Total pharmacies</span><strong>{counts.total}</strong><small>All onboarded records</small></div>
-        <div className="admin-stat-card"><span>Verified</span><strong>{counts.VERIFIED}</strong><small>Active marketplace partners</small></div>
-        <div className="admin-stat-card"><span>Pending review</span><strong>{counts.PENDING}</strong><small>Applications needing action</small></div>
-        <div className="admin-stat-card"><span>Attention needed</span><strong>{counts.REJECTED + counts.SUSPENDED}</strong><small>Rejected or suspended</small></div>
-      </div>
-
-      {!isAnalyticsPage && !isAuditPage && <div className="admin-panel">
-        <div className="admin-panel-header">
-          <div>
-            <h2>All pharmacies</h2>
-            <p>Network directory and onboarding status.</p>
-          </div>
-          <div className="admin-filter-tabs">
-            {(isVerificationPage ? ['PENDING'] : ['ALL', 'PENDING', 'VERIFIED', 'REJECTED', 'SUSPENDED']).map((filter) => (
-              <button
-                type="button"
-                key={filter}
-                className={effectiveFilter === filter ? 'active' : ''}
-                onClick={() => setActiveFilter(filter)}
-              >
-                {filter === 'ALL' ? 'All' : filter.charAt(0) + filter.slice(1).toLowerCase()}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {isLoading ? (
-          <div className="admin-empty-state">Loading pharmacy network...</div>
-        ) : visiblePharmacies.length === 0 ? (
-          <div className="admin-empty-state">No pharmacies match this status.</div>
-        ) : (
-          <div className="admin-table-wrap">
-            <table className="admin-table">
-              <thead>
-                <tr>
-                  <th>Pharmacy</th>
-                  <th>Location</th>
-                  <th>License</th>
-                  <th>Status</th>
-                  <th>Last updated</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {visiblePharmacies.map((pharmacy) => (
-                  <tr key={pharmacy.id}>
-                    <td>
-                      <strong>{pharmacy.display_name}</strong>
-                      <small>{pharmacy.legal_name || 'Legal name not provided'}</small>
-                    </td>
-                    <td>{pharmacy.city}, {pharmacy.region}</td>
-                    <td>{pharmacy.license_number || 'Not provided'}</td>
-                    <td><span className={`admin-status admin-status-${pharmacy.verification_status.toLowerCase()}`}>{pharmacy.verification_status}</span></td>
-                    <td>{pharmacy.updated_at ? new Date(pharmacy.updated_at).toLocaleDateString() : '—'}</td>
-                    <td>
-                      <div className="admin-row-actions">
-                        {pharmacy.verification_status === 'PENDING' && (
-                          <>
-                            <button type="button" className="btn btn-primary btn-sm" onClick={() => onVerificationChange(pharmacy, 'VERIFIED')}>Approve</button>
-                            <button type="button" className="btn btn-outline btn-sm" onClick={() => onVerificationChange(pharmacy, 'REJECTED')}>Reject</button>
-                          </>
-                        )}
-                        {pharmacy.verification_status === 'VERIFIED' && (
-                          <button type="button" className="btn btn-outline btn-sm" onClick={() => onVerificationChange(pharmacy, 'SUSPENDED')}>Suspend</button>
-                        )}
-                        {(pharmacy.verification_status === 'REJECTED' || pharmacy.verification_status === 'SUSPENDED') && (
-                          <button type="button" className="btn btn-primary btn-sm" onClick={() => onVerificationChange(pharmacy, 'VERIFIED')}>Restore</button>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>}
-
-      {isAnalyticsPage && (
-        <PlatformAnalyticsHeatmap
-          pharmacies={pharmacies}
-          auditLogs={auditEvents}
-          onVerifyPharmacy={onVerificationChange}
-        />
-      )}
-
-      {!isAuditPage && !isAnalyticsPage && <div className="admin-insight-grid">
-        <div className="admin-panel">
-          <h2>Verification queue</h2>
-          <p>Pending applications are surfaced first for license and business-detail review.</p>
-          <strong className="admin-insight-number">{counts.PENDING}</strong>
-          <span className="admin-insight-label">applications awaiting review</span>
-        </div>
-        <div className="admin-panel">
-          <h2>Network coverage</h2>
-          <p>Verified pharmacies currently eligible to receive marketplace orders.</p>
-          <strong className="admin-insight-number">{counts.VERIFIED}</strong>
-          <span className="admin-insight-label">active verified partners</span>
-        </div>
-        <div className="admin-panel">
-          <h2>Audit readiness</h2>
-          <p>All onboarding and pharmacy changes are recorded through the platform audit trail.</p>
-          <strong className="admin-insight-number">{auditEvents.length}</strong>
-          <span className="admin-insight-label">recent events loaded</span>
-        </div>
-      </div>}
-
-      {(!isAnalyticsPage || isAuditPage) && <div className="admin-panel">
-        <div className="admin-panel-header">
-          <div>
-            <h2>Recent audit activity</h2>
-            <p>Verification and onboarding events across the pharmacy network.</p>
-          </div>
-        </div>
-        {auditEvents.length === 0 ? (
-          <div className="admin-empty-state">No audit events recorded yet.</div>
-        ) : (
-          <div className="admin-audit-list">
-            {auditEvents.slice(0, 8).map((event) => (
-              <div className="admin-audit-item" key={event.id}>
-                <span className="admin-audit-dot" />
-                <div>
-                  <strong>{event.event_type.replaceAll('_', ' ')}</strong>
-                  <small>{event.entity_type} · {new Date(event.created_at).toLocaleString()}</small>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>}
-
-      {isAnalyticsPage && (
-        <div className="admin-panel">
-          <div className="admin-panel-header">
-            <div>
-              <h2>Operational indicators</h2>
-              <p>Current demo-network indicators sourced from pharmacy onboarding records.</p>
-            </div>
-          </div>
-          <div className="admin-insight-grid">
-            <div><strong className="admin-insight-number">{counts.VERIFIED}</strong><span className="admin-insight-label">verified pharmacies receiving orders</span></div>
-            <div><strong className="admin-insight-number">{counts.PENDING}</strong><span className="admin-insight-label">applications awaiting review</span></div>
-            <div><strong className="admin-insight-number">{auditEvents.length}</strong><span className="admin-insight-label">audit events in current activity window</span></div>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function PharmacySettingsPage({ pharmacyData, onOpenCsvImport }) {
-  return (
-    <div className="admin-page">
-      <div className="admin-page-header">
-        <div>
-          <span className="admin-eyebrow">🏥 PHARMACY OPERATIONS</span>
-          <h1>Pharmacy settings</h1>
-          <p>Review the pharmacy profile and operational configuration used for fulfillment.</p>
-        </div>
-      </div>
-      <div className="admin-panel">
-        <h2>{pharmacyData?.display_name || 'Pharmacy profile'}</h2>
-        <div className="admin-settings-grid">
-          <div><span>Legal name</span><strong>{pharmacyData?.legal_name || 'Not provided'}</strong></div>
-          <div><span>License number</span><strong>{pharmacyData?.license_number || 'Not provided'}</strong></div>
-          <div><span>Location</span><strong>{pharmacyData?.address_line || 'Not provided'}{pharmacyData?.city ? `, ${pharmacyData.city}` : ''}</strong></div>
-          <div><span>Verification status</span><strong>{pharmacyData?.verification_status || 'Unknown'}</strong></div>
-        </div>
-        <div className="admin-settings-actions">
-          <button type="button" className="btn btn-outline btn-sm" onClick={onOpenCsvImport}>⇧ Import inventory CSV</button>
-          <span className="admin-settings-note">Profile editing and staff management can be added here without changing the customer marketplace.</span>
-        </div>
-      </div>
-    </div>
-  );
-}
 
 /* ==========================================================================
    Main App Component
@@ -1573,8 +482,16 @@ function App() {
         const res = await fetch('/v1/auth/me', {
           headers: { 'Authorization': `Bearer ${currentToken}` },
         });
-        const data = await res.json();
-        if (!res.ok || !data.data) throw new Error('Session expired.');
+        if (res.status === 401 || res.status === 403) {
+          throw new Error('SESSION_INVALID');
+        }
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || !data.data) {
+          if (!cancelled) {
+            showToast('PharmaLink API is temporarily unavailable. Using cached session.', 'info');
+          }
+          return;
+        }
         if (!cancelled) {
           setCurrentUser(data.data.user);
           setPharmacyData(data.data.pharmacy || null);
@@ -1600,16 +517,20 @@ function App() {
             setActivePage(pageFromPath(currentPath));
           }
         }
-      } catch {
+      } catch (err) {
         if (!cancelled) {
-          try {
-            window.localStorage.removeItem('pharmalink-auth-token');
-            window.localStorage.removeItem('pharmalink-user');
-            window.localStorage.removeItem('pharmalink-pharmacy');
-          } catch {}
-          setCurrentToken(null);
-          setCurrentUser(null);
-          setPharmacyData(null);
+          if (err && err.message === 'SESSION_INVALID') {
+            try {
+              window.localStorage.removeItem('pharmalink-auth-token');
+              window.localStorage.removeItem('pharmalink-user');
+              window.localStorage.removeItem('pharmalink-pharmacy');
+            } catch {}
+            setCurrentToken(null);
+            setCurrentUser(null);
+            setPharmacyData(null);
+          } else {
+            showToast('Offline or API unreachable. Reconnect to sync live data.', 'info');
+          }
         }
       } finally {
         if (!cancelled) setAuthRestoring(false);
@@ -1805,9 +726,16 @@ function App() {
         url += `&pharmacy_id=${encodeURIComponent(pharmacyFilter.id)}`;
       }
       const res = await fetch(url);
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (res.ok && data.data) {
         setSearchResults(data.data || []);
+      } else {
+        showToast(
+          res.status === 503
+            ? 'PharmaLink is starting up. Please retry in a moment.'
+            : (data.error?.message || 'Could not load medicine results.'),
+          'error'
+        );
       }
     } catch (err) {
       showToast('Search request failed', 'error');
@@ -2178,7 +1106,7 @@ function App() {
       }
 
       const payment = data.data;
-      const paystackPubKey = 'pk_test_6567afd684881d60818b564d5e55108cf2276dc7';
+      const paystackPubKey = payment.public_key;
 
       const verifyPaymentRef = function(ref) {
         showToast('Verifying payment with network...', 'info');
@@ -2203,9 +1131,9 @@ function App() {
           });
       };
 
-      // If window.PaystackPop is available, open popup
+      // If server returned a Paystack public key and PaystackPop is available, open inline popup
       let popupOpened = false;
-      if (typeof window !== 'undefined' && window.PaystackPop && typeof window.PaystackPop.setup === 'function') {
+      if (paystackPubKey && typeof window !== 'undefined' && window.PaystackPop && typeof window.PaystackPop.setup === 'function') {
         try {
           const handler = window.PaystackPop.setup({
             key: paystackPubKey,
@@ -2789,16 +1717,15 @@ function App() {
                         <span className="hero-dot"></span> Licensed Pharmacies Across Ghana
                       </span>
                       
-                      {/* Animated Word-by-Word Hero Reveal */}
-                      <HeroHeadlineReveal text="Medicine, from the pharmacy closest to you." />
+                      <h1 className="hero-heading">Find medicine at a pharmacy near you.</h1>
                       
                       <p className="hero-description">
-                        GH PharmaLink (ghpharmalink.com) matches your search directly to verified dispensary stock and fast delivery near your location.
+                        Search medicine availability at participating pharmacies and review pickup or delivery options near you.
                       </p>
 
                       {/* Search Bar */}
                       <form className="hero-search-form" onSubmit={(e) => { e.preventDefault(); navigateTo('medicines'); performSearch(searchQuery); }}>
-                        <span style={{ marginLeft: '0.75rem', fontSize: '1.2rem', color: 'var(--text-muted)' }}>🔍</span>
+                        <Icon name="search" size={20} style={{ marginLeft: '0.75rem', color: 'var(--text-muted)', flexShrink: 0 }} />
                         <input
                           className="hero-search-input"
                           placeholder="Search Paracetamol, Amoxicillin, Vitamin C, Coartem..."
@@ -2834,14 +1761,14 @@ function App() {
                             onClick={requestGeoLocation}
                             style={{ fontSize: '0.78rem' }}
                           >
-                            🎯 Detect GPS Proximity
+                            Detect nearby pharmacies
                           </button>
                           <button
                             className="btn btn-outline btn-sm"
                             onClick={() => setIsLocationModalOpen(true)}
                             style={{ fontSize: '0.78rem' }}
                           >
-                            📍 Change City
+                            <Icon name="pin" size={15} /> Change city
                           </button>
                         </div>
                       </div>
@@ -2855,14 +1782,14 @@ function App() {
                   >
                     <div className="hero-twist-image-overlay">
                       <div className="tag">Ghana-first Healthcare</div>
-                      <div className="title">100% Authentic & FDA Verified</div>
-                      <div className="subtitle">Dispensed exclusively by Pharmacy Council accredited partners.</div>
+                      <div className="title">Check availability before you travel</div>
+                      <div className="subtitle">Confirm stock and fulfillment details with the pharmacy before placing your order.</div>
                     </div>
                   </div>
 
                   {/* Side Card 2: Upload Prescription */}
                   <div className="hero-rx-card">
-                    <div className="rx-icon-badge">📄</div>
+                    <div className="rx-icon-badge"><Icon name="shield" size={25} /></div>
                     <div>
                       <h3 style={{ fontSize: '1.25rem', fontWeight: 800, marginTop: '0.75rem' }}>Upload doctor's prescription</h3>
                       <p style={{ fontSize: '0.85rem', opacity: 0.9, marginTop: '0.25rem', lineHeight: 1.5 }}>Snap a photo, get verified by a pharmacist, receive express delivery.</p>
@@ -2874,25 +1801,6 @@ function App() {
 
                 </div>
 
-                {/* STATS COUNTER BANNER */}
-                <div className="stats-banner">
-                  <div className="stat-item">
-                    <div className="stat-number">120+</div>
-                    <div className="stat-label">Partner Pharmacies</div>
-                  </div>
-                  <div className="stat-item">
-                    <div className="stat-number">8,400+</div>
-                    <div className="stat-label">Verified Medicines</div>
-                  </div>
-                  <div className="stat-item">
-                    <div className="stat-number">&lt; 60 min</div>
-                    <div className="stat-label">Average Delivery</div>
-                  </div>
-                  <div className="stat-item">
-                    <div className="stat-number">16 Regions</div>
-                    <div className="stat-label">Nationwide Coverage</div>
-                  </div>
-                </div>
               </section>
 
               {/* SHOP BY CATEGORY SECTION */}
@@ -2907,14 +1815,14 @@ function App() {
 
                 <div className="categories-grid">
                   {[
-                    { emoji: '🩹', name: 'Pain Relief', count: '142 items', q: 'Paracetamol' },
-                    { emoji: '💊', name: 'Antibiotics', count: '64 items', q: 'Amoxicillin' },
-                    { emoji: '🦟', name: 'Antimalarials', count: '52 items', q: 'Coartem' },
-                    { emoji: '🍊', name: 'Vitamins', count: '218 items', q: 'Vitamin C' },
-                    { emoji: '🍼', name: 'Baby Care', count: '96 items', q: 'Calpol' },
-                    { emoji: '🌸', name: "Women's Health", count: '78 items', q: 'Iron' },
-                    { emoji: '✨', name: 'Allergy Care', count: '85 items', q: 'Cetirizine' },
-                    { emoji: '➕', name: 'First Aid', count: '41 items', q: 'Bandage' },
+                    { icon: 'bandage', name: 'Pain relief', q: 'Paracetamol' },
+                    { icon: 'pill', name: 'Antibiotics', q: 'Amoxicillin' },
+                    { icon: 'cross', name: 'Antimalarials', q: 'Coartem' },
+                    { icon: 'sun', name: 'Vitamins', q: 'Vitamin C' },
+                    { icon: 'baby', name: 'Baby care', q: 'Calpol' },
+                    { icon: 'heart', name: "Women's health", q: 'Iron' },
+                    { icon: 'medical', name: 'Allergy care', q: 'Cetirizine' },
+                    { icon: 'cross', name: 'First aid', q: 'Bandage' },
                   ].map((cat, idx) => (
                     <div
                       key={idx}
@@ -2925,9 +1833,8 @@ function App() {
                         performSearch(cat.q);
                       }}
                     >
-                      <span className="category-emoji">{cat.emoji}</span>
+                      <Icon name={cat.icon} className="category-icon" size={24} />
                       <span className="category-name">{cat.name}</span>
-                      <span className="category-count">{cat.count}</span>
                     </div>
                   ))}
                 </div>
@@ -3023,7 +1930,7 @@ function App() {
                     </div>
                     <h3 style={{ fontSize: '1.2rem', fontWeight: 800, marginTop: '1.25rem' }}>Search or upload Rx</h3>
                     <p style={{ fontSize: '0.88rem', color: 'var(--text-muted)', marginTop: '0.5rem', lineHeight: 1.6 }}>
-                      Find medicines by brand, generic, or symptom — or upload a photo of your doctor's prescription during checkout.
+                      Find medicines by brand, generic name, or symptom. You can also upload a prescription during checkout.
                     </p>
                   </div>
 
@@ -3109,6 +2016,8 @@ function App() {
               onBrowsePharmacyStock={handleBrowsePharmacyStock}
               onRefresh={loadVerifiedPharmacies}
             />
+          ) : activePage === 'terms' || activePage === 'privacy' ? (
+            <LegalPage type={activePage} onBack={() => navigateTo('home')} />
           ) : activePage === 'howItWorks' ? (
             <HowItWorksPage onBrowseMedicines={() => navigateTo('medicines')} />
           ) : (
@@ -3539,11 +2448,11 @@ function App() {
         <div className="footer-grid">
           <div>
             <div className="brand-wrapper" style={{ marginBottom: '0.85rem' }}>
-              <div className="brand-logo-badge">💊</div>
+              <div className="brand-logo-badge"><Icon name="pill" size={20} /></div>
               <span>GH PharmaLink</span>
             </div>
             <p style={{ fontSize: '0.9rem', color: 'var(--text-muted)', lineHeight: 1.6, maxWidth: '320px' }}>
-              Ghana's digital pharmacy availability and ordering network at ghpharmalink.com. Guaranteed authentic medicines from verified dispensaries near you.
+              Search medicine availability at participating pharmacies in Ghana, then choose pickup or delivery where offered.
             </p>
           </div>
 
@@ -3571,8 +2480,8 @@ function App() {
             <h4>Support & Help</h4>
             <ul>
               <li><a href="#">Emergency Help</a></li>
-              <li><a href="#">Terms of Service</a></li>
-              <li><a href="#">Privacy & Prescription Safety</a></li>
+              <li><a href={pagePaths.terms} onClick={(e) => { e.preventDefault(); navigateTo('terms'); }}>Terms of Service</a></li>
+              <li><a href={pagePaths.privacy} onClick={(e) => { e.preventDefault(); navigateTo('privacy'); }}>Privacy & Prescription Safety</a></li>
               <li><a href="#">Contact Pharmacist Support</a></li>
             </ul>
           </div>

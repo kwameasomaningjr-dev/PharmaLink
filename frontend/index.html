@@ -3,12 +3,21 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>GH PharmaLink — Real-time Medicine Availability & Pharmacy Network in Ghana | ghpharmalink.com</title>
-  <meta name="description" content="Search genuine medicines and check real-time stock across licensed pharmacies in Ghana. Order for instant pickup or fast delivery on ghpharmalink.com.">
-  <meta property="og:title" content="GH PharmaLink — Verified Medicine Radar in Ghana">
+  <title>GH PharmaLink | Medicine Availability in Ghana</title>
+  <meta name="description" content="Search medicine availability at participating pharmacies in Ghana and review pickup or delivery options.">
+  <meta property="og:title" content="GH PharmaLink | Medicine Availability in Ghana">
   <meta property="og:description" content="Check real-time stock across verified pharmacies in Accra, Kumasi, and across Ghana on ghpharmalink.com.">
   <link rel="canonical" href="https://ghpharmalink.com">
   
+  <!-- PWA & Mobile Web Meta -->
+  <meta name="theme-color" content="#059669">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="PharmaLink">
+  <link rel="manifest" href="/manifest.json">
+  <link rel="apple-touch-icon" href="/logo.png">
+  <link rel="icon" type="image/png" href="/logo.png">
+
   <!-- Google Fonts: Plus Jakarta Sans, Outfit, JetBrains Mono -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -66,5 +75,14 @@
       <div style="font-size: 0.85rem; opacity: 0.7; margin-top: 4px;">Connecting to Ghana pharmacy network</div>
     </div>
   </div>
+  <script>
+    if ('serviceWorker' in navigator && window.location.protocol.startsWith('http')) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('/service-worker.js')
+          .then((reg) => console.log('[PWA] ServiceWorker registered with scope:', reg.scope))
+          .catch((err) => console.debug('[PWA] ServiceWorker registration skipped/failed:', err));
+      });
+    }
+  </script>
 </body>
 </html>

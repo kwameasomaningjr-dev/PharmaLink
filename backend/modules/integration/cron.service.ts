@@ -77,14 +77,21 @@ export class IntegrationCronService {
    * Sweeps expired orders and reservations
    */
   public static async runExpirationSweeps(): Promise<{ expired_orders: number; expired_reservations: number }> {
-    const [expiredOrders, expiredReservations] = await Promise.all([
-      OrderService.sweepExpiredOrders(),
-      OrderService.sweepExpiredReservations(),
-    ]);
-    return {
-      expired_orders: expiredOrders,
-      expired_reservations: expiredReservations,
-    };
+    const lockRun = await db.withAdvisoryLock(48001, async () => {
+      const [expiredOrders, expiredReservations] = await Promise.all([
+        OrderService.sweepExpiredOrders(),
+        OrderService.sweepExpiredReservations(),
+      ]);
+      return {
+        expired_orders: expiredOrders,
+        expired_reservations: expiredReservations,
+      };
+    });
+
+    if (!lockRun.acquired || !lockRun.result) {
+      return { expired_orders: 0, expired_reservations: 0 };
+    }
+    return lockRun.result;
   }
 
   /**
@@ -110,38 +117,51 @@ export class IntegrationCronService {
     let failed = 0;
 
     try {
-      const connectionsRes = await db.query(
-        `SELECT c.id, c.pharmacy_id, c.provider_name, c.provider_type, c.credentials_ref, c.status,
-                p.display_name, p.license_number
-         FROM integration_connections c
-         JOIN pharmacies p ON c.pharmacy_id = p.id
-         WHERE c.status != 'DISCONNECTED' AND p.verification_status = 'VERIFIED'
-         ORDER BY c.last_sync_at ASC NULLS FIRST`
-      );
+      const lockRun = await db.withAdvisoryLock(48002, async () => {
+        const connectionsRes = await db.query(
+          `SELECT c.id, c.pharmacy_id, c.provider_name, c.provider_type, c.credentials_ref, c.status,
+                  p.display_name, p.license_number
+           FROM integration_connections c
+           JOIN pharmacies p ON c.pharmacy_id = p.id
+           WHERE c.status != 'DISCONNECTED' AND p.verification_status = 'VERIFIED'
+           ORDER BY c.last_sync_at ASC NULLS FIRST`
+        );
 
-      const connections = connectionsRes.rows;
+        const connections = connectionsRes.rows;
 
-      for (const conn of connections) {
-        try {
-          const syncResult = await this.syncConnection(conn.id);
-          succeeded++;
-          results.push({
-            connection_id: conn.id,
-            pharmacy_id: conn.pharmacy_id,
-            provider_name: conn.provider_name,
-            status: syncResult.status,
-            records_accepted: syncResult.records_accepted,
-          });
-        } catch (err: any) {
-          failed++;
-          results.push({
-            connection_id: conn.id,
-            pharmacy_id: conn.pharmacy_id,
-            provider_name: conn.provider_name,
-            status: 'FAILED',
-            error: err.message || 'Sync failed',
-          });
+        for (const conn of connections) {
+          try {
+            const syncResult = await this.syncConnection(conn.id);
+            succeeded++;
+            results.push({
+              connection_id: conn.id,
+              pharmacy_id: conn.pharmacy_id,
+              provider_name: conn.provider_name,
+              status: syncResult.status,
+              records_accepted: syncResult.records_accepted,
+            });
+          } catch (err: any) {
+            failed++;
+            results.push({
+              connection_id: conn.id,
+              pharmacy_id: conn.pharmacy_id,
+              provider_name: conn.provider_name,
+              status: 'FAILED',
+              error: err.message || 'Sync failed',
+            });
+          }
         }
+      });
+
+      if (!lockRun.acquired) {
+        return {
+          started_at: startedAt,
+          completed_at: new Date().toISOString(),
+          connections_processed: 0,
+          connections_succeeded: 0,
+          connections_failed: 0,
+          results: [],
+        };
       }
     } finally {
       this.isRunning = false;

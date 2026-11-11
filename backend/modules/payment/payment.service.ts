@@ -47,6 +47,10 @@ export class PaymentService {
     ? new PaystackProvider(process.env.PAYSTACK_SECRET_KEY, process.env.PAYSTACK_PUBLIC_KEY)
     : new UnavailablePaymentProvider();
 
+  public static getProvider(): PaymentProvider {
+    return this.provider;
+  }
+
   public static setProvider(provider: PaymentProvider) {
     this.provider = provider;
   }
@@ -126,50 +130,88 @@ export class PaymentService {
     });
 
     const payment = (await db.query(`SELECT * FROM payments WHERE id = $1`, [paymentId])).rows[0];
+    const publicKey =
+      'getPublicKey' in this.provider && typeof (this.provider as any).getPublicKey === 'function'
+        ? String((this.provider as any).getPublicKey() || '').trim() || undefined
+        : undefined;
     return {
       ...payment,
       authorization_url: providerResult.authorizationUrl,
       access_code: providerResult.accessCode,
+      public_key: publicKey,
     };
   }
 
   public static async verifyPayment(customerId: string, reference: string) {
     if (!reference?.trim()) throw new ValidationError('Payment reference is required.');
+    const trimmedRef = reference.trim();
 
-    let verification: { status: PaymentStatus; amount?: number; raw?: any } = { status: 'PENDING' };
+    const paymentRes = await db.query(
+      `SELECT p.* FROM payments p
+       JOIN orders o ON o.id = p.order_id
+       WHERE (p.provider_reference = $1 OR p.id::text = $1) AND o.customer_id = $2`,
+      [trimmedRef, customerId]
+    );
+
+    if (paymentRes.rowCount === 0) {
+      throw new NotFoundError('Payment');
+    }
+
+    const payment = paymentRes.rows[0];
+    if (payment.status === 'SUCCESS') {
+      return payment;
+    }
+
+    let verification: { status: PaymentStatus; amount?: number; currency?: string; raw?: any } = { status: 'PENDING' };
     if ('verifyTransaction' in this.provider && typeof (this.provider as any).verifyTransaction === 'function') {
       try {
-        verification = await (this.provider as any).verifyTransaction(reference.trim());
+        verification = await (this.provider as any).verifyTransaction(trimmedRef);
       } catch (err: any) {
         console.error('Paystack verification error:', err);
       }
     }
 
-    const paymentRes = await db.query(
-      `SELECT p.* FROM payments p
-       JOIN orders o ON o.id = p.order_id
-       WHERE (p.provider_reference = $1 OR p.id = $1) AND o.customer_id = $2`,
-      [reference.trim(), customerId]
-    );
+    if (verification.status === 'SUCCESS') {
+      const requiresAmount = this.provider.name === 'paystack' || verification.amount !== undefined;
+      const amountMatches = !requiresAmount || Number(verification.amount) === Number(payment.amount_minor);
+      const currencyMatches =
+        !verification.currency ||
+        String(verification.currency).toUpperCase() === String(payment.currency).toUpperCase();
 
-    if (paymentRes.rowCount > 0) {
-      const payment = paymentRes.rows[0];
-      if (verification.status === 'SUCCESS' && payment.status !== 'SUCCESS') {
-        await db.query(`UPDATE payments SET status = 'SUCCESS', updated_at = CURRENT_TIMESTAMP WHERE id = $1`, [payment.id]);
+      if (!amountMatches || !currencyMatches) {
         await AuditService.recordEvent({
           actorUserId: customerId,
           pharmacyId: null,
-          eventType: 'PAYMENT_SUCCESS',
+          eventType: 'PAYMENT_VERIFICATION_MISMATCH',
           entityType: 'PAYMENT',
           entityId: payment.id,
-          metadata: { provider: this.provider.name, reference: reference.trim() },
+          metadata: {
+            expected_amount_minor: payment.amount_minor,
+            verified_amount_minor: verification.amount,
+            expected_currency: payment.currency,
+            verified_currency: verification.currency,
+            reference: trimmedRef,
+          },
         });
-        return { ...payment, status: 'SUCCESS' };
+        throw new ConflictError(
+          'PAYMENT_AMOUNT_MISMATCH',
+          'Verified payment amount or currency does not match the order total.'
+        );
       }
-      return payment;
+
+      await db.query(`UPDATE payments SET status = 'SUCCESS', updated_at = CURRENT_TIMESTAMP WHERE id = $1`, [payment.id]);
+      await AuditService.recordEvent({
+        actorUserId: customerId,
+        pharmacyId: null,
+        eventType: 'PAYMENT_SUCCESS',
+        entityType: 'PAYMENT',
+        entityId: payment.id,
+        metadata: { provider: this.provider.name, reference: trimmedRef, amount_minor: payment.amount_minor },
+      });
+      return { ...payment, status: 'SUCCESS' };
     }
 
-    return { status: verification.status, reference };
+    return payment;
   }
 
   public static async getPayment(customerId: string, paymentId: string) {

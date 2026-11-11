@@ -1,0 +1,15 @@
+node_modules
+dist
+frontend/dist
+data
+uploads
+.env
+.env.*
+!.env.example
+.git
+.github
+tests
+docs
+*.log
+coverage
+.pglite-absolute-probe

@@ -1,0 +1,48 @@
+# Render Free-Tier Blueprint for PharmaLink MVP ($0/mo validation stack)
+# Pairs Render Free Web Service (Frankfurt, closest EU region to Ghana) with an
+# external non-expiring Free PostgreSQL database (Neon.tech or Supabase in Frankfurt/London).
+# Note: Avoid Render's free Postgres because it expires after 30 days.
+services:
+  - type: web
+    name: pharmalink-api
+    runtime: node
+    region: frankfurt
+    plan: free
+    buildCommand: npm ci && npm run build
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 4000
+      - key: JWT_SECRET
+        generateValue: true
+      - key: CORS_ORIGIN
+        value: https://ghpharmalink.com
+      - key: APP_URL
+        value: https://ghpharmalink.com
+      - key: TRUST_PROXY_HOPS
+        value: 1
+      - key: AUTH_RATE_LIMIT_MAX
+        value: 20
+      - key: API_RATE_LIMIT_PER_MINUTE
+        value: 120
+      # Paste your free Neon / Supabase Frankfurt PostgreSQL URL during setup:
+      - key: DATABASE_URL
+        sync: false
+      # Optional until ready for live payments & durable R2 uploads:
+      - key: PAYSTACK_SECRET_KEY
+        sync: false
+      - key: PAYSTACK_PUBLIC_KEY
+        sync: false
+      - key: OBJECT_STORAGE_ENDPOINT
+        sync: false
+      - key: OBJECT_STORAGE_BUCKET
+        sync: false
+      - key: OBJECT_STORAGE_REGION
+        value: auto
+      - key: OBJECT_STORAGE_ACCESS_KEY_ID
+        sync: false
+      - key: OBJECT_STORAGE_SECRET_ACCESS_KEY
+        sync: false

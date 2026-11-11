@@ -1,6 +1,4 @@
 import { v4 as uuidv4 } from 'uuid';
-import fs from 'node:fs/promises';
-import path from 'node:path';
 import { db } from '../../database/connection.js';
 import {
   ComplianceDocumentType,
@@ -9,6 +7,7 @@ import {
   UserRole,
 } from '../../common/types.js';
 import { ValidationError, NotFoundError, ForbiddenError } from '../../common/errors.js';
+import { PrivateStorage } from '../../common/object-storage.js';
 import { AuditService } from '../audit/audit.service.js';
 
 // ---------------------------------------------------------------------------
@@ -32,22 +31,6 @@ const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024; // 10 MB
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-/**
- * Returns the base upload directory.
- * Compliance files are stored under `uploads/compliance/` — never in the public web root.
- */
-function uploadRoot(): string {
-  if (process.env.UPLOAD_DIR) return path.resolve(process.env.UPLOAD_DIR);
-  if (
-    process.env.VERCEL ||
-    process.env.NODE_ENV === 'production' ||
-    process.env.AWS_LAMBDA_FUNCTION_NAME
-  ) {
-    return '/tmp/uploads';
-  }
-  return path.resolve('./uploads');
-}
 
 /**
  * Validates file magic bytes against declared MIME type to prevent content-type spoofing.
@@ -94,11 +77,8 @@ export class ComplianceService {
 
     const docId = uuidv4();
     const storageKey = `compliance/${pharmacyId}/${docId}.${extension}`;
-    const directory = path.join(uploadRoot(), 'compliance', pharmacyId);
-    const filePath = path.join(directory, `${docId}.${extension}`);
 
-    await fs.mkdir(directory, { recursive: true });
-    await fs.writeFile(filePath, file.buffer, { flag: 'wx' });
+    await PrivateStorage.putObject(storageKey, file.buffer, file.mimetype);
 
     try {
       await db.query(
@@ -119,7 +99,7 @@ export class ComplianceService {
       );
     } catch (err) {
       // Roll back the file write if the DB insert fails to avoid orphaned files.
-      await fs.unlink(filePath).catch(() => {});
+      await PrivateStorage.deleteObject(storageKey).catch(() => {});
       throw err;
     }
 
@@ -245,7 +225,7 @@ export class ComplianceService {
     actorUserId: string,
     role: UserRole,
     actorPharmacyId?: string
-  ): Promise<{ filePath: string; mimeType: string }> {
+  ): Promise<{ buffer: Buffer; mimeType: string }> {
     const doc = await this.getDocumentById(docId);
     if (!doc) throw new NotFoundError('Compliance document');
 
@@ -254,13 +234,11 @@ export class ComplianceService {
       throw new ForbiddenError('Access denied to this document');
     }
 
-    const filePath = path.join(uploadRoot(), doc.storage_key);
-    try {
-      await fs.access(filePath);
-    } catch {
+    const buffer = await PrivateStorage.getObject(doc.storage_key);
+    if (!buffer) {
       throw new NotFoundError('Document file not found on storage');
     }
 
-    return { filePath, mimeType: doc.mime_type || 'application/octet-stream' };
+    return { buffer, mimeType: doc.mime_type || 'application/octet-stream' };
   }
 }

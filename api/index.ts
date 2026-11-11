@@ -1,10 +1,12 @@
 import { createApp } from '../backend/app.js';
 import { seedDatabase } from '../backend/database/seed.js';
+import { assertSecurityConfiguration } from '../backend/common/middleware.js';
 
 let appInstance: any = null;
 let initPromise: Promise<void> | null = null;
 
 function getApp() {
+  assertSecurityConfiguration();
   if (!appInstance) {
     appInstance = createApp();
   }

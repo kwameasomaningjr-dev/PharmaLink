@@ -31,13 +31,28 @@ export class PaystackProvider implements PaymentProvider {
     return this.publicKey;
   }
 
+  private isTestOrMockAllowed(): boolean {
+    return (
+      process.env.NODE_ENV === 'test' ||
+      (process.env.NODE_ENV !== 'production' && (!this.secretKey || this.secretKey.startsWith('mock_')))
+    );
+  }
+
+  private assertLiveKeyIfProduction(): void {
+    if (process.env.NODE_ENV === 'production' && (!this.secretKey || this.secretKey.startsWith('mock_'))) {
+      throw new Error('Live PAYSTACK_SECRET_KEY is required in production.');
+    }
+  }
+
   async initiate(input: PaystackInitializeInput): Promise<PaystackInitializeResponse> {
     const email = input.customerEmail || 'customer@pharmalink.gh';
     const reference = `PL_PAY_${input.paymentId.replace(/-/g, '').slice(0, 12)}_${Date.now().toString(36)}`;
     const callbackUrl = input.callbackUrl || `${process.env.APP_URL || 'http://localhost:4000'}/`;
 
-    // Simulation fallback in test environment without live key
-    if (process.env.NODE_ENV === 'test' || !this.secretKey || this.secretKey.startsWith('mock_')) {
+    this.assertLiveKeyIfProduction();
+
+    // Simulation fallback in test or non-production local environments without live key
+    if (this.isTestOrMockAllowed()) {
       return {
         status: 'PENDING',
         providerReference: reference,
@@ -97,9 +112,11 @@ export class PaystackProvider implements PaymentProvider {
     }
   }
 
-  async verifyTransaction(reference: string): Promise<{ status: PaymentStatus; amount: number; raw: any }> {
-    if (process.env.NODE_ENV === 'test' || !this.secretKey || this.secretKey.startsWith('mock_')) {
-      return { status: 'SUCCESS', amount: 1000, raw: { reference, status: 'success' } };
+  async verifyTransaction(reference: string): Promise<{ status: PaymentStatus; amount: number; currency?: string; raw: any }> {
+    this.assertLiveKeyIfProduction();
+
+    if (this.isTestOrMockAllowed()) {
+      return { status: 'SUCCESS', amount: 1000, currency: 'GHS', raw: { reference, status: 'success' } };
     }
 
     try {
@@ -118,6 +135,7 @@ export class PaystackProvider implements PaymentProvider {
       return {
         status: mappedStatus,
         amount: data.data?.amount,
+        currency: data.data?.currency,
         raw: data.data,
       };
     } catch (err: any) {
@@ -126,7 +144,9 @@ export class PaystackProvider implements PaymentProvider {
   }
 
   async refund(providerReference: string, amountMinor?: number): Promise<{ success: boolean; refundId: string }> {
-    if (process.env.NODE_ENV === 'test' || !this.secretKey || this.secretKey.startsWith('mock_')) {
+    this.assertLiveKeyIfProduction();
+
+    if (this.isTestOrMockAllowed()) {
       return { success: true, refundId: `ref_${Date.now()}` };
     }
 

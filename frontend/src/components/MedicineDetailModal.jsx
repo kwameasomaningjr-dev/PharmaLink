@@ -164,7 +164,7 @@ export function MedicineDetailModal({ medicineEntry, onClose, onAddToCart, allSe
                   <div>
                     <div style={{ fontWeight: 800, fontSize: '0.88rem' }}>🏥 {item.pharmacy.display_name}</div>
                     <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                      📍 {item.distance_km?.toFixed(1) || '—'} km away · 🕒 {item.freshness}
+                      📍 {item.distance_km != null ? `${item.distance_km.toFixed(1)} km away` : 'Distance unavailable'} · 🕒 {item.freshness}
                     </div>
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>

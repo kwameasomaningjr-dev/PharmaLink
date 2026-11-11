@@ -5,6 +5,7 @@ import { AppError, UnauthorizedError, ForbiddenError } from './errors.js';
 import { sendError } from './response.js';
 import { UserRole } from './types.js';
 import { db } from '../database/connection.js';
+import { PrivateStorage } from './object-storage.js';
 
 export interface AuthUser {
   id: string;
@@ -30,23 +31,42 @@ declare global {
 
 const DEVELOPMENT_JWT_SECRET = 'pharmalink_dev_jwt_secret_key_change_in_production_min_32_chars';
 
+function isWeakJwtSecret(secret?: string): boolean {
+  return !secret || secret.length < 32 || secret === DEVELOPMENT_JWT_SECRET;
+}
+
 function getJwtSecret(): string {
-  return process.env.JWT_SECRET?.trim() || DEVELOPMENT_JWT_SECRET;
+  const secret = process.env.JWT_SECRET?.trim();
+  if (process.env.NODE_ENV === 'production' && isWeakJwtSecret(secret)) {
+    throw new Error(
+      '[Security] Fatal: JWT_SECRET must be set to a unique secret of at least 32 characters in production.'
+    );
+  }
+  return secret || DEVELOPMENT_JWT_SECRET;
 }
 
 export function assertSecurityConfiguration(): void {
+  const isProd = process.env.NODE_ENV === 'production';
   const secret = process.env.JWT_SECRET?.trim();
-  if (!secret || secret.length < 32 || secret === DEVELOPMENT_JWT_SECRET) {
-    if (process.env.NODE_ENV === 'production' && !process.env.VERCEL) {
-      console.warn('[Security] Warning: JWT_SECRET should be set in production environment variables.');
+  if (isWeakJwtSecret(secret)) {
+    if (isProd) {
+      throw new Error(
+        '[Security] Fatal: JWT_SECRET must be set to a unique secret of at least 32 characters in production.'
+      );
     }
   }
 
   const corsOrigin = process.env.CORS_ORIGIN?.trim();
   if (!corsOrigin || corsOrigin === '*') {
-    if (process.env.NODE_ENV === 'production' && !process.env.VERCEL) {
-      console.warn('[Security] Warning: CORS_ORIGIN is wildcard (*).');
+    if (isProd) {
+      console.warn('[Security] Warning: CORS_ORIGIN is unset or wildcard (*) in production.');
     }
+  }
+
+  if (isProd && !PrivateStorage.isConfigured() && !process.env.UPLOAD_DIR?.trim()) {
+    console.warn(
+      '[Storage] Warning: OBJECT_STORAGE_* is not configured in production; falling back to local disk uploads.'
+    );
   }
 }
 

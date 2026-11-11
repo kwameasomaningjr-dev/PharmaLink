@@ -8,6 +8,11 @@ export async function seedDatabase(force = false) {
   console.log('[Seed] Ensuring schema exists...');
   await runMigrations();
 
+  if (process.env.NODE_ENV === 'production' && process.env.ALLOW_DEMO_SEED !== 'true') {
+    console.log('[Seed] Skipping demo seed data in production (set ALLOW_DEMO_SEED=true only for staging demos).');
+    return;
+  }
+
   const existing = await db.query('SELECT COUNT(*) as cnt FROM users');
   if (!force && Number(existing.rows[0]?.cnt) > 0 && process.env.NODE_ENV !== 'test') {
     console.log(`[Seed] Database already seeded (${existing.rows[0].cnt} users). Ready.`);

@@ -8,9 +8,10 @@ export async function runMigrations() {
 
   activeMigration = (async () => {
     console.log('[Migration] Starting database migration...');
-    try {
-      await db.exec('SET search_path TO public;');
-    } catch {}
+    // Open the database before running statements. A connection/startup failure
+    // must stop migration rather than being reported once for every statement.
+    await db.getClient();
+    await db.exec('SET search_path TO public;');
 
     const statements = SCHEMA_SQL
       .split(';')

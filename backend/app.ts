@@ -6,9 +6,12 @@ import rateLimit from 'express-rate-limit';
 import path from 'path';
 import { v1Router } from './routes/v1.router.js';
 import { requestIdMiddleware, errorHandler } from './common/middleware.js';
+import { PrivateStorage } from './common/object-storage.js';
+import { db } from './database/connection.js';
 
-export function createApp() {
+export function createApp(isReady: () => boolean = () => true) {
   const app = express();
+  app.set('trust proxy', Number(process.env.TRUST_PROXY_HOPS || 1));
   const configuredOrigins = (process.env.CORS_ORIGIN || '*')
     .split(',')
     .map((origin) => origin.trim())
@@ -27,6 +30,20 @@ export function createApp() {
     skip: () => process.env.NODE_ENV === 'test',
   });
 
+  const authRateLimiter = rateLimitFn({
+    windowMs: 15 * 60 * 1000,
+    max: Number(process.env.AUTH_RATE_LIMIT_MAX || 20),
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: {
+      error: {
+        code: 'RATE_LIMITED',
+        message: 'Too many authentication attempts. Please wait 15 minutes and try again.',
+      },
+    },
+    skip: () => process.env.NODE_ENV === 'test' && process.env.TEST_RATE_LIMIT !== 'true',
+  });
+
   // Standard middleware
   app.disable('x-powered-by');
   app.use(helmetFn({ contentSecurityPolicy: false }));
@@ -39,15 +56,41 @@ export function createApp() {
   }));
   app.use(express.urlencoded({ extended: true }));
   app.use(requestIdMiddleware);
+  app.use((_req, res, next) => {
+    if (!isReady()) {
+      res.set('Retry-After', '1');
+      return res.status(503).json({
+        status: 'starting',
+        message: 'PharmaLink is preparing its database. Retry shortly.',
+      });
+    }
+    return next();
+  });
   app.use('/v1', apiRateLimiter);
+  app.use('/v1/auth/login', authRateLimiter);
+  app.use('/v1/auth/register', authRateLimiter);
+  app.use('/v1/auth/change-password', authRateLimiter);
 
-  // Health check
-  app.get('/health', (_req, res) => {
-    res.json({
-      status: 'ok',
-      service: 'pharmalink-api',
-      time: new Date().toISOString(),
-    });
+  // Health check (verifies startup readiness and DB reachability for PaaS probes)
+  app.get('/health', async (_req, res) => {
+    try {
+      await db.query('SELECT 1');
+      res.json({
+        status: 'ok',
+        service: 'pharmalink-api',
+        database: 'connected',
+        storage: PrivateStorage.mode(),
+        time: new Date().toISOString(),
+      });
+    } catch {
+      res.status(503).json({
+        status: 'degraded',
+        service: 'pharmalink-api',
+        database: 'unavailable',
+        storage: PrivateStorage.mode(),
+        time: new Date().toISOString(),
+      });
+    }
   });
 
   // Static assets for Web App UI

@@ -1,9 +1,9 @@
 import { v4 as uuidv4 } from 'uuid';
-import fs from 'node:fs/promises';
 import path from 'node:path';
 import { db } from '../../database/connection.js';
 import { Prescription, PrescriptionStatus } from '../../common/types.js';
 import { ValidationError, NotFoundError, ForbiddenError } from '../../common/errors.js';
+import { PrivateStorage } from '../../common/object-storage.js';
 import { AuditService } from '../audit/audit.service.js';
 import { NotificationService } from '../notification/notification.service.js';
 
@@ -16,14 +16,6 @@ const allowedFileTypes = new Map([
   ['image/jpeg', 'jpg'],
   ['image/png', 'png'],
 ]);
-
-function uploadRoot(): string {
-  if (process.env.UPLOAD_DIR) return path.resolve(process.env.UPLOAD_DIR);
-  if (process.env.VERCEL || process.env.NODE_ENV === 'production' || process.env.AWS_LAMBDA_FUNCTION_NAME) {
-    return '/tmp/uploads';
-  }
-  return path.resolve('./uploads');
-}
 
 function hasExpectedSignature(buffer: Buffer, mimeType: string): boolean {
   if (!buffer || buffer.length < 4) return false;
@@ -64,11 +56,8 @@ export class PrescriptionService {
     const prescriptionId = uuidv4();
     const filename = `${prescriptionId}.${extension}`;
     const storageKey = `prescriptions/${filename}`;
-    const directory = path.join(uploadRoot(), 'prescriptions');
-    const filePath = path.join(directory, filename);
 
-    await fs.mkdir(directory, { recursive: true });
-    await fs.writeFile(filePath, file.buffer, { flag: 'wx' });
+    await PrivateStorage.putObject(storageKey, file.buffer, file.mimetype);
 
     try {
       await db.query(
@@ -87,7 +76,7 @@ export class PrescriptionService {
         metadata: { order_id: orderId, mime_type: file.mimetype, size_bytes: file.size },
       });
     } catch (err) {
-      await fs.unlink(filePath).catch(() => undefined);
+      await PrivateStorage.deleteObject(storageKey).catch(() => undefined);
       throw err;
     }
 
@@ -140,19 +129,14 @@ export class PrescriptionService {
       throw new NotFoundError('Prescription file');
     }
 
-    const root = uploadRoot();
-    const filePath = path.resolve(root, prescription.storage_key.replaceAll('/', path.sep));
-    if (!filePath.startsWith(`${root}${path.sep}`)) throw new ForbiddenError('Invalid prescription file path.');
-
-    try {
-      await fs.access(filePath);
-    } catch {
+    const buffer = await PrivateStorage.getObject(prescription.storage_key);
+    if (!buffer) {
       throw new NotFoundError('Prescription file');
     }
 
-    const extension = path.extname(filePath).toLowerCase();
+    const extension = path.extname(prescription.storage_key).toLowerCase();
     const mimeType = extension === '.pdf' ? 'application/pdf' : extension === '.png' ? 'image/png' : 'image/jpeg';
-    return { filePath, mimeType };
+    return { buffer, mimeType };
   }
 
   public static async listPendingForPharmacy(pharmacyId?: string) {
