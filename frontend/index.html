@@ -17,6 +17,18 @@
   <link rel="manifest" href="/manifest.json">
   <link rel="apple-touch-icon" href="/logo.png">
   <link rel="icon" type="image/png" href="/logo.png">
+  <script>
+    window.__deferredInstallPrompt = null;
+    window.addEventListener('beforeinstallprompt', function (event) {
+      event.preventDefault();
+      window.__deferredInstallPrompt = event;
+      window.dispatchEvent(new CustomEvent('pharmalink:install-available'));
+    });
+    window.addEventListener('appinstalled', function () {
+      window.__deferredInstallPrompt = null;
+      window.dispatchEvent(new CustomEvent('pharmalink:app-installed'));
+    });
+  </script>
 
   <!-- Google Fonts: Plus Jakarta Sans, Outfit, JetBrains Mono -->
   <link rel="preconnect" href="https://fonts.googleapis.com">

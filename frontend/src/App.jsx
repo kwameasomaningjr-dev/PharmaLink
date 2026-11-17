@@ -246,8 +246,15 @@ function App() {
     } catch {}
   }, [pharmacyData]);
 
-  const [deferredInstallPrompt, setDeferredInstallPrompt] = useState(null);
+  const [deferredInstallPrompt, setDeferredInstallPrompt] = useState(() => {
+    try {
+      return window.__deferredInstallPrompt || null;
+    } catch {
+      return null;
+    }
+  });
   const [isInstallDismissed, setIsInstallDismissed] = useState(false);
+  const [isInstallGuideOpen, setIsInstallGuideOpen] = useState(false);
   const [isStandaloneMode, setIsStandaloneMode] = useState(() => {
     try {
       return window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
@@ -259,29 +266,44 @@ function App() {
   useEffect(() => {
     const handleBeforeInstallPrompt = (event) => {
       event.preventDefault();
+      window.__deferredInstallPrompt = event;
       setDeferredInstallPrompt(event);
     };
+    const handleCustomInstallReady = () => {
+      if (window.__deferredInstallPrompt) {
+        setDeferredInstallPrompt(window.__deferredInstallPrompt);
+      }
+    };
     const handleAppInstalled = () => {
+      window.__deferredInstallPrompt = null;
       setDeferredInstallPrompt(null);
       setIsStandaloneMode(true);
+      showToast('PharmaLink installed to home screen!', 'success');
     };
     window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+    window.addEventListener('pharmalink:install-available', handleCustomInstallReady);
     window.addEventListener('appinstalled', handleAppInstalled);
+    window.addEventListener('pharmalink:app-installed', handleAppInstalled);
     return () => {
       window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+      window.removeEventListener('pharmalink:install-available', handleCustomInstallReady);
       window.removeEventListener('appinstalled', handleAppInstalled);
+      window.removeEventListener('pharmalink:app-installed', handleAppInstalled);
     };
   }, []);
 
   const handleInstallPwa = async () => {
-    if (!deferredInstallPrompt) return;
-    deferredInstallPrompt.prompt();
-    try {
-      const choice = await deferredInstallPrompt.userChoice;
-      if (choice?.outcome === 'accepted') {
-        setDeferredInstallPrompt(null);
-      }
-    } catch {}
+    if (deferredInstallPrompt) {
+      deferredInstallPrompt.prompt();
+      try {
+        const choice = await deferredInstallPrompt.userChoice;
+        if (choice?.outcome === 'accepted') {
+          setDeferredInstallPrompt(null);
+        }
+      } catch {}
+    } else {
+      setIsInstallGuideOpen(true);
+    }
   };
 
   const isPharmacyUser = useMemo(() => {
@@ -2530,7 +2552,7 @@ function App() {
         </div>
       </footer>}
 
-      {deferredInstallPrompt && !isStandaloneMode && !isInstallDismissed && (
+      {!isStandaloneMode && !isInstallDismissed && (
         <div className="pwa-install-banner" role="region" aria-label="Install GH PharmaLink App">
           <div className="pwa-install-copy">
             <strong>Install GH PharmaLink</strong>
@@ -3625,6 +3647,18 @@ function App() {
                   >
                     🛍️ View My Orders
                   </button>
+                  {!isStandaloneMode && (
+                    <button
+                      className="btn btn-outline"
+                      style={{ width: '100%', marginBottom: '0.75rem', padding: '0.75rem', borderColor: 'var(--primary)', color: 'var(--primary)' }}
+                      onClick={() => {
+                        setIsProfileOpen(false);
+                        handleInstallPwa();
+                      }}
+                    >
+                      📲 Install App on Phone
+                    </button>
+                  )}
                   <label style={{ display: 'flex', alignItems: 'flex-start', gap: '0.65rem', padding: '0.85rem', marginBottom: '0.75rem', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)' }}>
                     <input
                       type="checkbox"
@@ -3734,6 +3768,61 @@ function App() {
           }}
           onViewFile={(prescriptionId) => viewPrescriptionFile(prescriptionId)}
         />
+      )}
+
+      {/* PWA INSTALLATION GUIDE MODAL */}
+      {isInstallGuideOpen && (
+        <div className="modal-overlay" onClick={() => setIsInstallGuideOpen(false)}>
+          <div className="modal-card" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '440px' }}>
+            <div className="modal-header">
+              <h3 style={{ fontSize: '1.2rem', fontWeight: 800 }}>📲 Install PharmaLink App</h3>
+              <button className="modal-close" onClick={() => setIsInstallGuideOpen(false)}>&times;</button>
+            </div>
+            <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem', background: 'var(--card-alt)', padding: '0.85rem', borderRadius: 'var(--radius-lg)' }}>
+                <img src="/icon-192.png" alt="PharmaLink" style={{ width: 48, height: 48, borderRadius: 12 }} />
+                <div>
+                  <strong style={{ display: 'block', fontSize: '0.95rem' }}>GH PharmaLink</strong>
+                  <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Fast offline-ready Ghana medicine radar</span>
+                </div>
+              </div>
+
+              <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)', padding: '0.9rem' }}>
+                <strong style={{ display: 'block', marginBottom: '0.35rem', color: 'var(--primary)', fontSize: '0.9rem' }}>
+                  🤖 On Android (Chrome / Edge / Samsung Internet):
+                </strong>
+                <ol style={{ paddingLeft: '1.2rem', fontSize: '0.85rem', lineHeight: 1.6, margin: 0, color: 'var(--text-main)' }}>
+                  <li>Tap the <strong>three dots (⋮)</strong> menu in your browser's top right corner.</li>
+                  <li>Tap <strong>"Install app"</strong> or <strong>"Add to Home screen"</strong>.</li>
+                  <li>Confirm by tapping <strong>Install</strong>.</li>
+                </ol>
+                <div style={{ marginTop: '0.5rem', fontSize: '0.78rem', color: 'var(--text-muted)', background: 'var(--card-alt)', padding: '0.4rem 0.6rem', borderRadius: 'var(--radius-sm)' }}>
+                  💡 <em>Note: If you are in an <strong>Incognito tab</strong>, open PharmaLink in a normal tab — browsers disable app installation in private tabs.</em>
+                </div>
+              </div>
+
+              <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)', padding: '0.9rem' }}>
+                <strong style={{ display: 'block', marginBottom: '0.35rem', color: 'var(--primary)', fontSize: '0.9rem' }}>
+                  🍎 On iPhone / iPad (Safari):
+                </strong>
+                <ol style={{ paddingLeft: '1.2rem', fontSize: '0.85rem', lineHeight: 1.6, margin: 0, color: 'var(--text-main)' }}>
+                  <li>Tap the <strong>Share</strong> button (the square with an arrow pointing up ⎋) at the bottom.</li>
+                  <li>Scroll down and tap <strong>"Add to Home Screen"</strong> (➕).</li>
+                  <li>Tap <strong>Add</strong> in the top-right corner.</li>
+                </ol>
+              </div>
+
+              <button
+                type="button"
+                className="btn btn-primary"
+                style={{ width: '100%', marginTop: '0.25rem', padding: '0.75rem' }}
+                onClick={() => setIsInstallGuideOpen(false)}
+              >
+                Got It
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* TOAST NOTIFICATION CONTAINER */}
