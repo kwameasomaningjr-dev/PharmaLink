@@ -154,6 +154,59 @@ export function BatchExpiryTracker({ inventory = [], onUpdateStock, onOpenCsvMod
           </tbody>
         </table>
       </div>
+
+      {/* Mobile Touch Cards */}
+      <div className="batch-shelf-cards">
+        {filtered.length === 0 ? (
+          <div style={{ padding: '2.5rem', textAlign: 'center', color: 'var(--text-muted)', background: 'var(--surface)', borderRadius: 'var(--radius-xl)', border: '1px solid var(--border)' }}>
+            No matching medicines found on shelf.
+          </div>
+        ) : (
+          filtered.map((item) => (
+            <div className="batch-shelf-card" key={item.id}>
+              <div className="batch-shelf-card-header">
+                <div>
+                  <strong>{item.generic_name}</strong>
+                  <small>{item.brand_name || 'Generic'} · Batch #{item.batchNo}</small>
+                </div>
+                <span className="badge badge-verified">{item.availability_state}</span>
+              </div>
+
+              <div className="batch-shelf-card-badges">
+                <span style={{ fontSize: '0.78rem', color: item.expiryStatus === 'EXPIRING_SOON' ? '#d97706' : '#10b981', fontWeight: 700 }}>
+                  {item.expiryStatus === 'EXPIRING_SOON' ? `⏳ Expiring in ${item.expiryMonths} mos` : `✓ Fresh (${item.expiryMonths} mos)`}
+                </span>
+                {item.isLow && <span className="badge badge-uncertain" style={{ fontSize: '0.68rem' }}>LOW STOCK</span>}
+              </div>
+
+              <div className="admin-touch-card-details">
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span>Shelf Available:</span>
+                  <strong style={{ color: item.isLow ? 'var(--destructive)' : 'var(--text-main)', fontSize: '0.95rem' }}>{item.available_quantity} units</strong>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span>Reserved by orders:</span>
+                  <span>{item.reserved_quantity} units</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span>Unit Price:</span>
+                  <strong style={{ color: 'var(--primary)', fontSize: '0.95rem' }}>GHS {(item.unit_price_minor / 100).toFixed(2)}</strong>
+                </div>
+              </div>
+
+              <div className="batch-shelf-card-actions">
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => onUpdateStock(item)}
+                >
+                  ✏️ Update Stock Count
+                </button>
+              </div>
+            </div>
+          ))
+        )}
+      </div>
     </div>
   );
 }

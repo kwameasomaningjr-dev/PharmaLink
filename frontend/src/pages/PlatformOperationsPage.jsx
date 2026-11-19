@@ -80,50 +80,89 @@ export function PlatformOperationsDashboard({
         ) : visiblePharmacies.length === 0 ? (
           <div className="admin-empty-state">No pharmacies match this status.</div>
         ) : (
-          <div className="admin-table-wrap">
-            <table className="admin-table">
-              <thead>
-                <tr>
-                  <th>Pharmacy</th>
-                  <th>Location</th>
-                  <th>License</th>
-                  <th>Status</th>
-                  <th>Last updated</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {visiblePharmacies.map((pharmacy) => (
-                  <tr key={pharmacy.id}>
-                    <td>
+          <>
+            <div className="admin-table-wrap">
+              <table className="admin-table">
+                <thead>
+                  <tr>
+                    <th>Pharmacy</th>
+                    <th>Location</th>
+                    <th>License</th>
+                    <th>Status</th>
+                    <th>Last updated</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {visiblePharmacies.map((pharmacy) => (
+                    <tr key={pharmacy.id}>
+                      <td>
+                        <strong>{pharmacy.display_name}</strong>
+                        <small>{pharmacy.legal_name || 'Legal name not provided'}</small>
+                      </td>
+                      <td>{pharmacy.city}, {pharmacy.region}</td>
+                      <td>{pharmacy.license_number || 'Not provided'}</td>
+                      <td><span className={`admin-status admin-status-${pharmacy.verification_status.toLowerCase()}`}>{pharmacy.verification_status}</span></td>
+                      <td>{pharmacy.updated_at ? new Date(pharmacy.updated_at).toLocaleDateString() : 'Not available'}</td>
+                      <td>
+                        <div className="admin-row-actions">
+                          {pharmacy.verification_status === 'PENDING' && (
+                            <>
+                              <button type="button" className="btn btn-primary btn-sm" onClick={() => onVerificationChange(pharmacy, 'VERIFIED')}>Approve</button>
+                              <button type="button" className="btn btn-outline btn-sm" onClick={() => onVerificationChange(pharmacy, 'REJECTED')}>Reject</button>
+                            </>
+                          )}
+                          {pharmacy.verification_status === 'VERIFIED' && (
+                            <button type="button" className="btn btn-outline btn-sm" onClick={() => onVerificationChange(pharmacy, 'SUSPENDED')}>Suspend</button>
+                          )}
+                          {(pharmacy.verification_status === 'REJECTED' || pharmacy.verification_status === 'SUSPENDED') && (
+                            <button type="button" className="btn btn-primary btn-sm" onClick={() => onVerificationChange(pharmacy, 'VERIFIED')}>Restore</button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="admin-touch-cards">
+              {visiblePharmacies.map((pharmacy) => (
+                <div className="admin-touch-card" key={pharmacy.id}>
+                  <div className="admin-touch-card-header">
+                    <div>
                       <strong>{pharmacy.display_name}</strong>
                       <small>{pharmacy.legal_name || 'Legal name not provided'}</small>
-                    </td>
-                    <td>{pharmacy.city}, {pharmacy.region}</td>
-                    <td>{pharmacy.license_number || 'Not provided'}</td>
-                    <td><span className={`admin-status admin-status-${pharmacy.verification_status.toLowerCase()}`}>{pharmacy.verification_status}</span></td>
-                    <td>{pharmacy.updated_at ? new Date(pharmacy.updated_at).toLocaleDateString() : 'Not available'}</td>
-                    <td>
-                      <div className="admin-row-actions">
-                        {pharmacy.verification_status === 'PENDING' && (
-                          <>
-                            <button type="button" className="btn btn-primary btn-sm" onClick={() => onVerificationChange(pharmacy, 'VERIFIED')}>Approve</button>
-                            <button type="button" className="btn btn-outline btn-sm" onClick={() => onVerificationChange(pharmacy, 'REJECTED')}>Reject</button>
-                          </>
-                        )}
-                        {pharmacy.verification_status === 'VERIFIED' && (
-                          <button type="button" className="btn btn-outline btn-sm" onClick={() => onVerificationChange(pharmacy, 'SUSPENDED')}>Suspend</button>
-                        )}
-                        {(pharmacy.verification_status === 'REJECTED' || pharmacy.verification_status === 'SUSPENDED') && (
-                          <button type="button" className="btn btn-primary btn-sm" onClick={() => onVerificationChange(pharmacy, 'VERIFIED')}>Restore</button>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                    </div>
+                    <span className={`admin-status admin-status-${pharmacy.verification_status.toLowerCase()}`}>
+                      {pharmacy.verification_status}
+                    </span>
+                  </div>
+
+                  <div className="admin-touch-card-details">
+                    <div>📍 <strong>Location:</strong> {pharmacy.city}, {pharmacy.region}</div>
+                    <div>📜 <strong>License:</strong> {pharmacy.license_number || 'Not provided'}</div>
+                    <div>🕒 <strong>Updated:</strong> {pharmacy.updated_at ? new Date(pharmacy.updated_at).toLocaleDateString() : 'Not available'}</div>
+                  </div>
+
+                  <div className="admin-touch-card-actions">
+                    {pharmacy.verification_status === 'PENDING' && (
+                      <>
+                        <button type="button" className="btn btn-primary btn-sm" onClick={() => onVerificationChange(pharmacy, 'VERIFIED')}>Approve</button>
+                        <button type="button" className="btn btn-outline btn-sm" onClick={() => onVerificationChange(pharmacy, 'REJECTED')}>Reject</button>
+                      </>
+                    )}
+                    {pharmacy.verification_status === 'VERIFIED' && (
+                      <button type="button" className="btn btn-outline btn-sm" onClick={() => onVerificationChange(pharmacy, 'SUSPENDED')}>Suspend Partner</button>
+                    )}
+                    {(pharmacy.verification_status === 'REJECTED' || pharmacy.verification_status === 'SUSPENDED') && (
+                      <button type="button" className="btn btn-primary btn-sm" onClick={() => onVerificationChange(pharmacy, 'VERIFIED')}>Restore Access</button>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </>
         )}
       </div>}
 

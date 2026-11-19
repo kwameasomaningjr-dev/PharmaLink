@@ -2272,7 +2272,8 @@ function App() {
                         onUpdateStatus={handleUpdateOrderStatus}
                       />
                     ) : (
-                      <div className="table-responsive-wrapper" style={{ background: 'var(--surface)', borderRadius: 'var(--radius-2xl)', border: '1px solid var(--border)', overflowX: 'auto', boxShadow: 'var(--shadow-xs)' }}>
+                      <>
+                        <div className="table-responsive-wrapper" style={{ background: 'var(--surface)', borderRadius: 'var(--radius-2xl)', border: '1px solid var(--border)', overflowX: 'auto', boxShadow: 'var(--shadow-xs)' }}>
                         <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '0.9rem', minWidth: '680px' }}>
                           <thead>
                             <tr style={{ background: 'var(--card-alt)', borderBottom: '1px solid var(--border)' }}>
@@ -2437,7 +2438,163 @@ function App() {
                           </tbody>
                         </table>
                       </div>
-                    )}
+
+                      {/* Mobile Touch Cards for Dispensary Orders */}
+                      <div className="dispensary-order-cards">
+                        {(() => {
+                          const filtered = pharmacyOrders.filter((ord) => {
+                            if (!pharmacyOrderSearch.trim()) return true;
+                            const q = pharmacyOrderSearch.trim().toLowerCase();
+                            return (
+                              ord.id?.toLowerCase().includes(q) ||
+                              ord.order_number?.toLowerCase().includes(q) ||
+                              ord.customer_name?.toLowerCase().includes(q) ||
+                              ord.customer_phone?.toLowerCase().includes(q)
+                            );
+                          });
+
+                          if (filtered.length === 0) {
+                            return (
+                              <div style={{ padding: '2.5rem', textAlign: 'center', color: 'var(--text-muted)', background: 'var(--surface)', borderRadius: 'var(--radius-xl)', border: '1px solid var(--border)' }}>
+                                {pharmacyOrderSearch.trim()
+                                  ? `No order found matching "${pharmacyOrderSearch}". Check the order number or customer phone.`
+                                  : 'No orders received yet. Incoming customer orders will appear here in real time.'}
+                              </div>
+                            );
+                          }
+
+                          return filtered.map((ord) => (
+                            <div className="dispensary-order-card" key={ord.id}>
+                              <div className="dispensary-order-card-header">
+                                <div>
+                                  <strong style={{ fontFamily: 'var(--font-mono)' }}>{ord.order_number || `#${ord.id.substring(0, 8)}`}</strong>
+                                  <small>{ord.customer_name || 'Customer'} {ord.customer_phone ? `· ${ord.customer_phone}` : ''}</small>
+                                </div>
+                                <span style={{ fontWeight: 800, color: 'var(--primary)', fontSize: '1.05rem' }}>
+                                  GHS {(Number(ord.total_minor || 0) / 100).toFixed(2)}
+                                </span>
+                              </div>
+
+                              <div className="dispensary-order-card-badges">
+                                <span className="badge badge-secondary" style={{ fontSize: '0.74rem' }}>
+                                  {ord.fulfillment_type === 'PICKUP' ? '🏥 Pickup' : '🚚 Delivery'}
+                                </span>
+                                <span className={`badge ${['ACCEPTED', 'COMPLETED', 'READY'].includes(ord.status) ? 'badge-verified' : 'badge-likely'}`} style={{ fontSize: '0.74rem' }}>
+                                  {ord.status === 'ACCEPTED' ? '🔒 RESERVED' : ord.status}
+                                </span>
+                                {ord.payment_status === 'SUCCESS' ? (
+                                  <span className="badge badge-verified" style={{ fontSize: '0.72rem', background: 'rgba(16, 185, 129, 0.15)', color: '#10b981', border: '1px solid rgba(16, 185, 129, 0.3)' }}>
+                                    💳 PAID ONLINE
+                                  </span>
+                                ) : ord.payment_status === 'REFUNDED' ? (
+                                  <span className="badge badge-verified" style={{ fontSize: '0.72rem', background: 'rgba(59, 130, 246, 0.15)', color: '#2563eb', border: '1px solid rgba(59, 130, 246, 0.3)' }}>
+                                    🔄 REFUNDED
+                                  </span>
+                                ) : (
+                                  <span className="badge badge-uncertain" style={{ fontSize: '0.72rem' }}>
+                                    💵 PAY AT COUNTER
+                                  </span>
+                                )}
+                              </div>
+
+                              {ord.delivery_address && (
+                                <div className="dispensary-order-card-details">
+                                  <div>📍 <strong>Delivery:</strong> {ord.delivery_address}</div>
+                                </div>
+                              )}
+
+                              <div className="dispensary-order-card-actions">
+                                {ord.status === 'PENDING' && (
+                                  <>
+                                    <button type="button" className="btn btn-primary btn-sm" onClick={() => handleAcceptOrder(ord.id)}>
+                                      ✓ Accept & Reserve
+                                    </button>
+                                    <button type="button" className="btn btn-secondary btn-sm" onClick={() => handleRejectOrder(ord.id)}>
+                                      ✕ Reject
+                                    </button>
+                                  </>
+                                )}
+
+                                {ord.status === 'ACCEPTED' && ord.fulfillment_type === 'PICKUP' && (
+                                  <>
+                                    <button
+                                      type="button"
+                                      className="btn btn-primary btn-sm"
+                                      onClick={() => handleUpdateOrderStatus(ord.id, 'COMPLETED')}
+                                      title="Customer is at counter. Dispense medicines and finalize order (deducts stock)"
+                                    >
+                                      ✓ Dispense & Confirm Pickup
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className="btn btn-outline btn-sm"
+                                      onClick={() => handleUpdateOrderStatus(ord.id, 'READY')}
+                                      title="Package prepared and kept ready on dispensary shelf"
+                                    >
+                                      📦 Mark Ready
+                                    </button>
+                                  </>
+                                )}
+
+                                {ord.status === 'ACCEPTED' && ord.fulfillment_type === 'DELIVERY' && (
+                                  <>
+                                    <button
+                                      type="button"
+                                      className="btn btn-primary btn-sm"
+                                      onClick={() => handleUpdateOrderStatus(ord.id, 'OUT_FOR_DELIVERY')}
+                                      title="Hand package to courier for delivery"
+                                    >
+                                      🚚 Dispatch Courier
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className="btn btn-outline btn-sm"
+                                      onClick={() => handleUpdateOrderStatus(ord.id, 'COMPLETED')}
+                                    >
+                                      ✓ Mark Delivered
+                                    </button>
+                                  </>
+                                )}
+
+                                {ord.status === 'READY' && (
+                                  <button
+                                    type="button"
+                                    className="btn btn-primary btn-sm"
+                                    onClick={() => handleUpdateOrderStatus(ord.id, 'COMPLETED')}
+                                    title="Customer is at counter to collect ready package"
+                                  >
+                                    ✓ Confirm Counter Pickup
+                                  </button>
+                                )}
+
+                                {ord.status === 'OUT_FOR_DELIVERY' && (
+                                  <button
+                                    type="button"
+                                    className="btn btn-primary btn-sm"
+                                    onClick={() => handleUpdateOrderStatus(ord.id, 'COMPLETED')}
+                                  >
+                                    ✓ Confirm Delivery Received
+                                  </button>
+                                )}
+
+                                {ord.status === 'COMPLETED' && (
+                                  <span style={{ fontSize: '0.82rem', color: '#10b981', fontWeight: 800, padding: '0.4rem 0' }}>
+                                    ✓ Dispensed & Fulfilled
+                                  </span>
+                                )}
+
+                                {['REJECTED', 'CANCELLED'].includes(ord.status) && (
+                                  <span style={{ fontSize: '0.82rem', color: 'var(--text-muted)', padding: '0.4rem 0' }}>
+                                    {ord.status}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          ));
+                        })()}
+                      </div>
+                    </>
+                  )}
                   </div>
                 )}
 
